@@ -305,6 +305,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "This app monitors your walking speed and steadiness to alert you when you are fatigued and need to rest in real-time.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "This app saves your recorded walking sessions to Apple Health to help you and your caregivers track your overall weekly activity progress.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -344,6 +345,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "This app monitors your walking speed and steadiness to alert you when you are fatigued and need to rest in real-time.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "This app saves your recorded walking sessions to Apple Health to help you and your caregivers track your overall weekly activity progress.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
