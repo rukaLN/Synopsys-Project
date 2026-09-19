@@ -6,6 +6,7 @@ import UserNotifications
 
 final class HealthKitManager: NSObject, ObservableObject {
     @Published var isTracking = false
+    @Published var isPaused = false
     @Published var steadinessStatus = "Unknown"
     @Published var currentPaceStatus = "Unknown"
     @Published var cadenceStatus = "Unknown"
@@ -90,6 +91,30 @@ final class HealthKitManager: NSObject, ObservableObject {
         monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
         #else
         startPedometerUpdates(from: startDate)
+        #endif
+    }
+
+    func pauseSession() {
+        isPaused = true
+        isTracking = true
+        simulatorTimer?.invalidate()
+        simulatorTimer = nil
+        pedometer.stopUpdates()
+        pedometer.stopEventUpdates()
+        monitoringMessage = "Monitoring paused. Data preserved."
+    }
+
+    func resumeSession() {
+        isPaused = false
+        isTracking = true
+        monitoringMessage = "Resumed live monitoring."
+
+        #if targetEnvironment(simulator)
+        startSimulatedWalkingUpdates()
+        steadinessStatus = "Simulator"
+        monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
+        #else
+        startPedometerUpdates(from: Date())
         #endif
     }
 
