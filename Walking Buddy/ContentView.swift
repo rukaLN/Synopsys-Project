@@ -56,9 +56,39 @@ struct ContentView: View {
                             .font(.title3).foregroundColor(.blue)
                     }
                     GridRow {
+                        Text("Elapsed Time:")
+                            .font(.title3).bold()
+                        Text(healthManager.elapsedTimeStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Break Risk:")
+                            .font(.title3).bold()
+                        Text(healthManager.riskScoreStatus)
+                            .font(.title3).bold().foregroundColor(.purple)
+                    }
+                    GridRow {
                         Text("Health Steadiness:")
                             .font(.title3).bold()
                         Text(healthManager.steadinessStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Asymmetry:")
+                            .font(.title3).bold()
+                        Text(healthManager.asymmetryStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Double Support:")
+                            .font(.title3).bold()
+                        Text(healthManager.doubleSupportStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Step Length:")
+                            .font(.title3).bold()
+                        Text(healthManager.stepLengthStatus)
                             .font(.title3).foregroundColor(.blue)
                     }
                 }
