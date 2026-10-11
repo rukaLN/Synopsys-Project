@@ -1,22 +1,19 @@
 import Foundation
 
-#if canImport(UIKit)
+#if os(iOS)
 import UIKit
-#endif
-
-#if canImport(CoreHaptics)
 import CoreHaptics
 #endif
 
-#if canImport(WatchKit)
+#if os(watchOS)
 import WatchKit
 #endif
 
 struct HapticsManager {
-    
+
     // MARK: - Core Haptics Engine
-    
-    #if canImport(CoreHaptics) && canImport(UIKit)
+
+    #if os(iOS)
     private static var engine: CHHapticEngine? = {
         do {
             let engine = try CHHapticEngine()
@@ -31,45 +28,33 @@ struct HapticsManager {
     // MARK: - Prepare
     
     static func prepare() {
-        #if canImport(UIKit)
-        if #available(iOS 13.0, *) {
-            // Pre-warm impact generator
-            let impact = UIImpactFeedbackGenerator(style: .medium)
-            impact.prepare()
-            
-            // Pre-warm notification generator
-            let notification = UINotificationFeedbackGenerator()
-            notification.prepare()
-            
-            #if canImport(CoreHaptics)
-            // Warm up Core Haptics engine if available
-            _ = engine
-            #endif
-        }
+        #if os(iOS)
+        // Pre-warm the impact and notification generators.
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.prepare()
+
+        let notification = UINotificationFeedbackGenerator()
+        notification.prepare()
+
+        // Warm up the Core Haptics engine.
+        _ = engine
         #endif
-        
-        #if canImport(WatchKit)
-        // Nothing to prepare for watchOS haptics
-        #endif
+
+        // Nothing to prepare for watchOS haptics.
     }
     
     // MARK: - Strong Alert
     
     static func strongAlert() {
-        #if canImport(UIKit)
-        if #available(iOS 13.0, *) {
-            // Notification warning haptic
-            let notification = UINotificationFeedbackGenerator()
-            notification.notificationOccurred(.warning)
-            
-            // Play custom Core Haptics pattern (~1.8s)
-            playStrongAlertPattern()
-            return
-        }
-        #endif
-        
-        #if canImport(WatchKit)
-        // On watchOS: play .failure then .retry after 0.6s
+        #if os(iOS)
+        // Notification warning haptic.
+        let notification = UINotificationFeedbackGenerator()
+        notification.notificationOccurred(.warning)
+
+        // Play custom Core Haptics pattern (~1.8s).
+        playStrongAlertPattern()
+        #elseif os(watchOS)
+        // On watchOS: play .failure then .retry after 0.6s.
         let device = WKInterfaceDevice.current()
         device.play(.failure)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -77,8 +62,8 @@ struct HapticsManager {
         }
         #endif
     }
-    
-    #if canImport(CoreHaptics) && canImport(UIKit)
+
+    #if os(iOS)
     private static func playStrongAlertPattern() {
         guard let engine = engine else { return }
         

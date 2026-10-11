@@ -1,121 +1,347 @@
 import Combine
-import CoreMotion
 import HealthKit
 import SwiftUI
 import UserNotifications
 
+#if os(iOS)
+import CoreMotion
+#endif
+
+/// Drives walking monitoring for both platforms.
+///
+/// The published state, the "needs a break" equation (``BreakRiskModel``), the
+/// walk-duration timer, and the alerting are all **shared**. The live sensor
+/// source is **platform-specific**:
+///
+/// - On **iPhone** we read live pace/cadence/steps/distance from `CMPedometer`
+///   and pull recent gait quality (steadiness, asymmetry, double-support,
+///   step length) from HealthKit as a baseline.
+/// - On **Apple Watch** we run a real `HKWorkoutSession` + `HKLiveWorkoutBuilder`
+///   and feed live heart rate, active energy, distance and steps into the model.
 final class HealthKitManager: NSObject, ObservableObject {
+
+    // MARK: - Shared published state
+
     @Published var isTracking = false
     @Published var isPaused = false
-    @Published var steadinessStatus = "Unknown"
-    @Published var currentPaceStatus = "Unknown"
-    @Published var cadenceStatus = "Unknown"
-    @Published var stepsStatus = "0"
-    @Published var distanceStatus = "0 m"
     @Published var monitoringMessage = "Start monitoring when the senior begins walking."
     @Published var alertMessage = "Your walking pattern suggests fatigue. Please find a safe place to sit down for a few minutes."
     @Published var triggersAlert = false
 
+    @Published var stepsStatus = "0"
+    @Published var distanceStatus = "0 m"
+    @Published var elapsedTimeStatus = "0:00"
+    @Published var riskScoreStatus = "0%"
+
+    // iPhone gait context (from HealthKit).
+    @Published var currentPaceStatus = "Unknown"
+    @Published var cadenceStatus = "Unknown"
+    @Published var steadinessStatus = "Unknown"
+    @Published var asymmetryStatus = "Unknown"
+    @Published var doubleSupportStatus = "Unknown"
+    @Published var stepLengthStatus = "Unknown"
+
+    // Apple Watch live workout metrics.
+    @Published var heartRateStatus = "–"
+    @Published var activeEnergyStatus = "–"
+
+    // MARK: - Shared dependencies & tuning
+
     private let healthStore = HKHealthStore()
-    private let pedometer = CMPedometer()
     private let notificationCenter = UNUserNotificationCenter.current()
-    private let walkingSpeedType = HKQuantityType.quantityType(forIdentifier: .walkingSpeed)
-    private let walkingSteadinessType = HKQuantityType.quantityType(forIdentifier: .appleWalkingSteadiness)
-    private let walkingSpeedUnit = HKUnit.meter().unitDivided(by: .second())
-    private let steadinessUnit = HKUnit.percent()
-    private let minimumSafeSpeed = 0.8
-    private let minimumSafeCadence = 1.2
+    private let riskModel = BreakRiskModel()
+
     private let maximumAlertFrequency: TimeInterval = 120
+    /// Seniors are advised to rest after a continuous walk of this length.
+    private let maximumWalkDuration: TimeInterval = 30 * 60
+
+    // MARK: - Shared latest readings (inputs to the equation)
 
     private var latestWalkingSpeed: Double?
-    private var latestWalkingSteadiness: Double?
     private var latestCadence: Double?
+    private var latestWalkingSteadiness: Double?
+    private var latestAsymmetry: Double?
+    private var latestDoubleSupport: Double?
+    private var latestHeartRateFraction: Double?
     private var latestStepCount = 0
     private var lastAlertDate: Date?
+
+    // MARK: - Duration tracking
+
+    private var clockTimer: Timer?
+    private var accumulatedWalkTime: TimeInterval = 0
+    private var segmentStartDate: Date?
+    private var hasWarnedAboutLongWalk = false
+
+    private var currentElapsed: TimeInterval {
+        var total = accumulatedWalkTime
+        if let segmentStartDate, isTracking, !isPaused {
+            total += Date().timeIntervalSince(segmentStartDate)
+        }
+        return total
+    }
+
+    // MARK: - iOS-only sensor state
+
+    #if os(iOS)
+    private let pedometer = CMPedometer()
     private var simulatorTimer: Timer?
+    #endif
+
+    // MARK: - watchOS-only workout state
+
+    #if os(watchOS)
+    private var workoutSession: HKWorkoutSession?
+    private var workoutBuilder: HKLiveWorkoutBuilder?
+    private var maxHeartRate: Double = 220 - 70   // updated from the user's age
+    #endif
+
+    // MARK: - Lifecycle (shared)
 
     func requestAuthorizationAndStart() {
         requestNotificationAuthorization()
-        requestHealthAuthorizationForContext()
-        startSession()
-    }
-
-    private func requestHealthAuthorizationForContext() {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            steadinessStatus = "Unavailable"
-            return
-        }
-        
-        let readTypes = healthReadTypes()
-        healthStore.requestAuthorization(toShare: nil, read: readTypes) { [weak self] success, _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-
-                if success {
-                    self.refreshLatestWalkingSteadiness()
-                } else {
-                    self.steadinessStatus = "Permission Denied"
-                }
-            }
+        requestHealthAuthorization { [weak self] in
+            self?.startSession()
         }
     }
 
     func stopSession() {
         isTracking = false
+        isPaused = false
         triggersAlert = false
-        latestWalkingSpeed = nil
-        latestWalkingSteadiness = nil
-        latestCadence = nil
-        latestStepCount = 0
-        simulatorTimer?.invalidate()
-        simulatorTimer = nil
-        pedometer.stopUpdates()
-        pedometer.stopEventUpdates()
+        resetLatestReadings()
+        stopClock()
+        accumulatedWalkTime = 0
+        segmentStartDate = nil
+        elapsedTimeStatus = "0:00"
+        riskScoreStatus = "0%"
+        stopSensors()
         monitoringMessage = "Monitoring stopped."
-    }
-
-    private func startSession() {
-        isTracking = true
-        steadinessStatus = "Waiting for Data"
-        currentPaceStatus = "Waiting for Data"
-        cadenceStatus = "Waiting for Data"
-        stepsStatus = "0"
-        distanceStatus = "0 m"
-        monitoringMessage = "Reading live pace and cadence from the motion sensors."
-
-        let startDate = Date()
-
-        #if targetEnvironment(simulator)
-        startSimulatedWalkingUpdates()
-        steadinessStatus = "Simulator"
-        monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
-        #else
-        startPedometerUpdates(from: startDate)
-        #endif
     }
 
     func pauseSession() {
         isPaused = true
-        isTracking = true
-        simulatorTimer?.invalidate()
-        simulatorTimer = nil
-        pedometer.stopUpdates()
-        pedometer.stopEventUpdates()
+        if let segmentStartDate {
+            accumulatedWalkTime += Date().timeIntervalSince(segmentStartDate)
+        }
+        segmentStartDate = nil
+        stopClock()
+        stopSensors()
         monitoringMessage = "Monitoring paused. Data preserved."
     }
 
     func resumeSession() {
         isPaused = false
         isTracking = true
+        segmentStartDate = Date()
+        startClock()
+        startSensors()
         monitoringMessage = "Resumed live monitoring."
+    }
+
+    private func startSession() {
+        isTracking = true
+        isPaused = false
+        hasWarnedAboutLongWalk = false
+        accumulatedWalkTime = 0
+        segmentStartDate = Date()
+        stepsStatus = "0"
+        distanceStatus = "0 m"
+        elapsedTimeStatus = "0:00"
+        riskScoreStatus = "0%"
+        monitoringMessage = "Reading live walking data from the sensors."
+
+        startClock()
+        startSensors()
+    }
+
+    private func resetLatestReadings() {
+        latestWalkingSpeed = nil
+        latestCadence = nil
+        latestWalkingSteadiness = nil
+        latestAsymmetry = nil
+        latestDoubleSupport = nil
+        latestHeartRateFraction = nil
+        latestStepCount = 0
+    }
+
+    // MARK: - Duration clock (shared)
+
+    private func startClock() {
+        clockTimer?.invalidate()
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.tickClock()
+        }
+    }
+
+    private func stopClock() {
+        clockTimer?.invalidate()
+        clockTimer = nil
+    }
+
+    private func tickClock() {
+        elapsedTimeStatus = Self.durationFormatter.string(from: currentElapsed) ?? "0:00"
+        checkWalkDuration()
+        updateBreakRisk()
+    }
+
+    private func checkWalkDuration() {
+        guard !hasWarnedAboutLongWalk, currentElapsed >= maximumWalkDuration else { return }
+        hasWarnedAboutLongWalk = true
+        let minutes = Int(maximumWalkDuration / 60)
+        presentBreakAlert(
+            message: "You have been walking for about \(minutes) minutes. Please find a safe place to sit down and rest."
+        )
+    }
+
+    // MARK: - The "needs a break" equation (shared)
+
+    private func updateBreakRisk() {
+        let inputs = BreakRiskModel.Inputs(
+            walkingSpeed: latestWalkingSpeed,
+            cadence: latestCadence,
+            steadiness: latestWalkingSteadiness,
+            asymmetry: latestAsymmetry,
+            doubleSupport: latestDoubleSupport,
+            heartRateFraction: latestHeartRateFraction,
+            durationFraction: currentElapsed / maximumWalkDuration,
+            stepCount: latestStepCount
+        )
+
+        let result = riskModel.evaluate(inputs)
+        riskScoreStatus = "\(Int((result.score * 100).rounded()))%"
+
+        guard result.needsBreak else { return }
+        presentBreakAlert(message: breakMessage(from: result.reasons))
+    }
+
+    private func breakMessage(from reasons: [String]) -> String {
+        guard !reasons.isEmpty else {
+            return "Your walking pattern suggests fatigue. Please find a safe place to sit down and rest."
+        }
+        return "Your \(reasons.joined(separator: ", and ")). Please find a safe place to sit down and rest."
+    }
+
+    // MARK: - Alerting (shared)
+
+    private func presentBreakAlert(message: String) {
+        alertMessage = message
+        if !triggersAlert {
+            HapticsManager.strongAlert()
+        }
+        triggersAlert = true
+        scheduleBreakNotificationIfNeeded(message: message)
+    }
+
+    private func scheduleBreakNotificationIfNeeded(message: String) {
+        let now = Date()
+        if let lastAlertDate, now.timeIntervalSince(lastAlertDate) < maximumAlertFrequency {
+            return
+        }
+        lastAlertDate = now
+
+        let content = UNMutableNotificationContent()
+        content.title = "Time to Take a Break"
+        content.body = "\(message)\n\(currentMetricsSummary())"
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "walking-break-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        notificationCenter.add(request)
+    }
+
+    private func currentMetricsSummary() -> String {
+        "Steps: \(stepsStatus) | Distance: \(distanceStatus) | Time: \(elapsedTimeStatus) | Risk: \(riskScoreStatus)"
+    }
+
+    private func requestNotificationAuthorization() {
+        notificationCenter.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    // MARK: - Formatters (shared)
+
+    static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.unitsStyle = .positional
+        formatter.zeroFormattingBehavior = .pad
+        return formatter
+    }()
+
+    static func metersString(_ meters: Double) -> String {
+        String(format: "%.0f m", meters)
+    }
+
+    static func speedString(_ metersPerSecond: Double) -> String {
+        String(format: "%.2f m/s", metersPerSecond)
+    }
+
+    static let cadenceFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    static let percentFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .percent
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+}
+
+// MARK: - iPhone sensor source (CMPedometer + HealthKit gait baseline)
+
+#if os(iOS)
+extension HealthKitManager {
+
+    private func startSensors() {
+        steadinessStatus = "Waiting for Data"
+        currentPaceStatus = "Waiting for Data"
+        cadenceStatus = "Waiting for Data"
+
+        refreshGaitBaseline()
 
         #if targetEnvironment(simulator)
         startSimulatedWalkingUpdates()
-        steadinessStatus = "Simulator"
         monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
         #else
         startPedometerUpdates(from: Date())
         #endif
+    }
+
+    private func stopSensors() {
+        pedometer.stopUpdates()
+        pedometer.stopEventUpdates()
+        simulatorTimer?.invalidate()
+        simulatorTimer = nil
+    }
+
+    private func requestHealthAuthorization(completion: @escaping () -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            steadinessStatus = "Unavailable"
+            completion()
+            return
+        }
+
+        healthStore.requestAuthorization(toShare: nil, read: iOSReadTypes()) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshGaitBaseline()
+                completion()
+            }
+        }
+    }
+
+    private func iOSReadTypes() -> Set<HKObjectType> {
+        let identifiers: [HKQuantityTypeIdentifier] = [
+            .walkingSpeed, .appleWalkingSteadiness, .walkingAsymmetryPercentage,
+            .walkingDoubleSupportPercentage, .walkingStepLength,
+            .stepCount, .distanceWalkingRunning, .activeEnergyBurned, .flightsClimbed,
+        ]
+        return Set(identifiers.compactMap { HKQuantityType.quantityType(forIdentifier: $0) })
     }
 
     private func startPedometerUpdates(from startDate: Date) {
@@ -127,266 +353,237 @@ final class HealthKitManager: NSObject, ObservableObject {
         pedometer.startUpdates(from: startDate) { [weak self] data, error in
             DispatchQueue.main.async {
                 guard let self else { return }
-
                 if error != nil {
                     self.monitoringMessage = "Motion data is unavailable. Check Motion & Fitness permission."
-                    self.isTracking = false
                     return
                 }
-
                 guard let data else { return }
-                self.updateLiveWalkingPattern(from: data)
+                self.applyPedometer(data)
             }
         }
     }
 
-    private func updateLiveWalkingPattern(from data: CMPedometerData) {
+    private func applyPedometer(_ data: CMPedometerData) {
         latestStepCount = data.numberOfSteps.intValue
         stepsStatus = "\(latestStepCount)"
 
         if let distance = data.distance?.doubleValue {
-            distanceStatus = Self.distanceFormatter.string(fromMeters: distance)
+            distanceStatus = Self.metersString(distance)
         }
 
         if let pace = data.currentPace?.doubleValue, pace > 0 {
             let metersPerSecond = 1 / pace
             latestWalkingSpeed = metersPerSecond
-            currentPaceStatus = Self.speedFormatter.string(fromMetersPerSecond: metersPerSecond)
-        } else if CMPedometer.isPaceAvailable() {
-            currentPaceStatus = "Waiting for Pace"
-        } else {
-            currentPaceStatus = "Pace Unsupported"
+            currentPaceStatus = Self.speedString(metersPerSecond)
         }
 
         if let cadence = data.currentCadence?.doubleValue {
             latestCadence = cadence
-            cadenceStatus = Self.cadenceFormatter.string(fromStepsPerSecond: cadence)
-        } else if CMPedometer.isCadenceAvailable() {
-            cadenceStatus = "Waiting for Cadence"
-        } else {
-            cadenceStatus = "Cadence Unsupported"
+            let stepsPerMinute = cadence * 60
+            cadenceStatus = (Self.cadenceFormatter.string(from: NSNumber(value: stepsPerMinute)) ?? "\(Int(stepsPerMinute))") + " steps/min"
         }
 
-        monitoringMessage = "Monitoring live steps, pace, cadence, and Health mobility context."
-        updateGaitRiskAlert()
+        updateBreakRisk()
     }
 
-    private func refreshLatestWalkingSteadiness() {
-        guard let walkingSteadinessType else {
-            steadinessStatus = "Unsupported"
+    /// Pulls the most recent passively-recorded gait samples. These update only a
+    /// handful of times per day, so they act as a quality baseline rather than a
+    /// live signal — but they still feed the break equation.
+    private func refreshGaitBaseline() {
+        fetchMostRecent(.appleWalkingSteadiness, unit: .percent()) { [weak self] value in
+            guard let self, let value else { return }
+            self.latestWalkingSteadiness = value
+            self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
+            self.updateBreakRisk()
+        }
+        fetchMostRecent(.walkingAsymmetryPercentage, unit: .percent()) { [weak self] value in
+            guard let self, let value else { return }
+            self.latestAsymmetry = value
+            self.asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
+            self.updateBreakRisk()
+        }
+        fetchMostRecent(.walkingDoubleSupportPercentage, unit: .percent()) { [weak self] value in
+            guard let self, let value else { return }
+            self.latestDoubleSupport = value
+            self.doubleSupportStatus = Self.percentFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
+            self.updateBreakRisk()
+        }
+        fetchMostRecent(.walkingStepLength, unit: .meter()) { [weak self] value in
+            guard let self, let value else { return }
+            self.stepLengthStatus = Self.metersString(value)
+        }
+    }
+
+    private func fetchMostRecent(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, completion: @escaping (Double?) -> Void) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
+            completion(nil)
             return
         }
-
-        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-        let query = HKSampleQuery(
-            sampleType: walkingSteadinessType,
-            predicate: nil,
-            limit: 1,
-            sortDescriptors: [sortDescriptor]
-        ) { [weak self] _, samples, error in
-            DispatchQueue.main.async {
-                guard let self else { return }
-
-                if error != nil {
-                    self.steadinessStatus = "Unavailable"
-                    return
-                }
-
-                guard let sample = samples?.first as? HKQuantitySample else {
-                    self.steadinessStatus = "No Saved Data"
-                    return
-                }
-
-                self.latestWalkingSteadiness = sample.quantity.doubleValue(for: self.steadinessUnit)
-                self.steadinessStatus = Self.steadinessDescription(for: sample.quantity)
-                self.updateGaitRiskAlert()
-            }
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        let query = HKSampleQuery(sampleType: type, predicate: nil, limit: 1, sortDescriptors: [sort]) { _, samples, _ in
+            let value = (samples?.first as? HKQuantitySample)?.quantity.doubleValue(for: unit)
+            DispatchQueue.main.async { completion(value) }
         }
-
         healthStore.execute(query)
-    }
-
-    private func updateLiveWalkingPattern(speed: Double, cadence: Double, steps: Int, distance: Double) {
-        latestWalkingSpeed = speed
-        latestCadence = cadence
-        latestStepCount = steps
-        stepsStatus = "\(steps)"
-        distanceStatus = Self.distanceFormatter.string(fromMeters: distance)
-        currentPaceStatus = Self.speedFormatter.string(fromMetersPerSecond: speed)
-        cadenceStatus = Self.cadenceFormatter.string(fromStepsPerSecond: cadence)
-        updateGaitRiskAlert()
     }
 
     private func startSimulatedWalkingUpdates() {
         simulatorTimer?.invalidate()
         var elapsedSeconds = 0
-
         simulatorTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
-
             elapsedSeconds += 1
             let fatigueStarts = elapsedSeconds > 20
             let speed = fatigueStarts ? 0.62 : 1.05
             let cadence = fatigueStarts ? 0.95 : 1.45
-            let steps = Int(Double(elapsedSeconds) * cadence)
-            let distance = Double(elapsedSeconds) * speed
-
-            self.updateLiveWalkingPattern(speed: speed, cadence: cadence, steps: steps, distance: distance)
+            self.latestWalkingSpeed = speed
+            self.latestCadence = cadence
+            self.latestStepCount = Int(Double(elapsedSeconds) * cadence)
+            self.latestWalkingSteadiness = fatigueStarts ? 0.35 : 0.75
+            self.stepsStatus = "\(self.latestStepCount)"
+            self.distanceStatus = Self.metersString(Double(elapsedSeconds) * speed)
+            self.currentPaceStatus = Self.speedString(speed)
+            self.cadenceStatus = "\(Int(cadence * 60)) steps/min"
+            self.steadinessStatus = fatigueStarts ? "Low" : "OK"
+            self.updateBreakRisk()
         }
     }
+}
+#endif
 
-    private func updateWalkingSpeed(from statistics: HKStatistics?) {
-        guard let quantity = statistics?.mostRecentQuantity() ?? statistics?.averageQuantity() else { return }
+// MARK: - Apple Watch sensor source (HKWorkoutSession + HKLiveWorkoutBuilder)
 
-        let metersPerSecond = quantity.doubleValue(for: walkingSpeedUnit)
-        latestWalkingSpeed = metersPerSecond
-        currentPaceStatus = Self.speedFormatter.string(fromMetersPerSecond: metersPerSecond)
-        updateGaitRiskAlert()
+#if os(watchOS)
+extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
+
+    private func startSensors() {
+        startWorkoutSession()
     }
 
-    private func updateWalkingSteadiness(from statistics: HKStatistics?) {
-        guard let quantity = statistics?.mostRecentQuantity() ?? statistics?.averageQuantity() else { return }
-
-        latestWalkingSteadiness = quantity.doubleValue(for: steadinessUnit)
-        steadinessStatus = Self.steadinessDescription(for: quantity)
-        updateGaitRiskAlert()
+    private func stopSensors() {
+        workoutSession?.end()
     }
 
-    private func updateGaitRiskAlert() {
-        let paceRisk = latestWalkingSpeed.map { $0 < minimumSafeSpeed } ?? false
-        let cadenceRisk = latestCadence.map { $0 < minimumSafeCadence } ?? false
-        let steadinessRisk = latestWalkingSteadiness.map { $0 < 0.4 } ?? false
-        let shouldAlert = latestStepCount >= 12 && (paceRisk || cadenceRisk || steadinessRisk)
-
-        guard shouldAlert else {
-            triggersAlert = false
+    private func requestHealthAuthorization(completion: @escaping () -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion()
             return
         }
 
-        alertMessage = breakMessage(paceRisk: paceRisk, cadenceRisk: cadenceRisk, steadinessRisk: steadinessRisk)
-        triggersAlert = true
-        scheduleBreakNotificationIfNeeded(message: alertMessage)
-    }
+        var share: Set<HKSampleType> = [HKQuantityType.workoutType()]
+        if let energy = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) { share.insert(energy) }
+        if let distance = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) { share.insert(distance) }
+        if let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate) { share.insert(heartRate) }
 
-    private func breakMessage(paceRisk: Bool, cadenceRisk: Bool, steadinessRisk: Bool) -> String {
-        var reasons: [String] = []
+        let read: Set<HKObjectType> = {
+            var types = Set(share.map { $0 as HKObjectType })
+            if let steps = HKQuantityType.quantityType(forIdentifier: .stepCount) { types.insert(steps) }
+            types.insert(HKObjectType.characteristicType(forIdentifier: .dateOfBirth)!)
+            return types
+        }()
 
-        if paceRisk {
-            reasons.append("walking speed has dropped")
-        }
-
-        if cadenceRisk {
-            reasons.append("step cadence has slowed")
-        }
-
-        if steadinessRisk {
-            reasons.append("walking steadiness is low")
-        }
-
-        return "Your \(reasons.joined(separator: " and ")). Please find a safe place to sit down and rest."
-    }
-
-    private func scheduleBreakNotificationIfNeeded(message: String) {
-        let now = Date()
-
-        if let lastAlertDate, now.timeIntervalSince(lastAlertDate) < maximumAlertFrequency {
-            return
-        }
-
-        lastAlertDate = now
-        let content = UNMutableNotificationContent()
-        content.title = "Time to Take a Break"
-        content.body = "\(message)\n\(currentMetricsSummary())"
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "walking-break-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-
-        notificationCenter.add(request)
-    }
-
-    private func currentMetricsSummary() -> String {
-        "Speed: \(currentPaceStatus) | Cadence: \(cadenceStatus) | Steps: \(stepsStatus) | Distance: \(distanceStatus)"
-    }
-
-    private func requestNotificationAuthorization() {
-        notificationCenter.requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
-    private func healthReadTypes() -> Set<HKObjectType> {
-        [walkingSpeedType, walkingSteadinessType].compactMap { $0 }.reduce(into: Set<HKObjectType>()) { result, type in
-            result.insert(type)
-        }
-    }
-
-    private static func steadinessDescription(for quantity: HKQuantity) -> String {
-        if let classification = try? HKAppleWalkingSteadinessClassification(for: quantity) {
-            switch classification {
-            case .veryLow:
-                return "Very Low"
-            case .low:
-                return "Low"
-            case .ok:
-                return "OK"
-            @unknown default:
-                break
+        healthStore.requestAuthorization(toShare: share, read: read) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateMaxHeartRateFromAge()
+                completion()
             }
         }
-
-        return steadinessDescription(for: quantity.doubleValue(for: .percent()))
     }
 
-    private static func steadinessDescription(for value: Double) -> String {
-        switch value {
-        case ..<0.2:
-            return "Very Low"
-        case ..<0.4:
-            return "Low"
-        default:
-            return "OK"
+    private func updateMaxHeartRateFromAge() {
+        if let components = try? healthStore.dateOfBirthComponents(),
+           let birthYear = components.year {
+            let age = Calendar.current.component(.year, from: Date()) - birthYear
+            if age > 0 { maxHeartRate = Double(220 - age) }
         }
     }
 
-    private static let distanceFormatter: MeasurementFormatter = {
-        let formatter = MeasurementFormatter()
-        formatter.unitStyle = .medium
-        formatter.unitOptions = .providedUnit
-        formatter.numberFormatter.maximumFractionDigits = 0
-        return formatter
-    }()
+    private func startWorkoutSession() {
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .walking
+        configuration.locationType = .outdoor
 
-    private static let speedFormatter: MeasurementFormatter = {
-        let formatter = MeasurementFormatter()
-        formatter.unitStyle = .medium
-        formatter.unitOptions = .providedUnit
-        formatter.numberFormatter.maximumFractionDigits = 2
-        return formatter
-    }()
+        do {
+            let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
+            let builder = session.associatedWorkoutBuilder()
+            builder.dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
+            session.delegate = self
+            builder.delegate = self
 
-    private static let cadenceFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.maximumFractionDigits = 0
-        return formatter
-    }()
-}
+            let start = Date()
+            session.startActivity(with: start)
+            builder.beginCollection(withStart: start) { _, _ in }
 
-private extension MeasurementFormatter {
-    func string(fromMeters meters: Double) -> String {
-        string(from: Measurement(value: meters, unit: UnitLength.meters))
+            workoutSession = session
+            workoutBuilder = builder
+            monitoringMessage = "Live workout running on Apple Watch."
+        } catch {
+            monitoringMessage = "Could not start the workout session."
+        }
     }
 
-    func string(fromMetersPerSecond metersPerSecond: Double) -> String {
-        string(from: Measurement(value: metersPerSecond, unit: UnitSpeed.metersPerSecond))
-    }
-}
+    // MARK: HKLiveWorkoutBuilderDelegate
 
-private extension NumberFormatter {
-    func string(fromStepsPerSecond stepsPerSecond: Double) -> String {
-        let stepsPerMinute = stepsPerSecond * 60
-        let formattedValue = string(from: NSNumber(value: stepsPerMinute)) ?? "\(Int(stepsPerMinute.rounded()))"
-        return "\(formattedValue) steps/min"
+    func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
+
+    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didCollectDataOf collectedTypes: Set<HKSampleType>) {
+        for type in collectedTypes {
+            guard let quantityType = type as? HKQuantityType,
+                  let statistics = workoutBuilder.statistics(for: quantityType) else { continue }
+            DispatchQueue.main.async {
+                self.apply(quantityType, statistics)
+            }
+        }
+    }
+
+    private func apply(_ type: HKQuantityType, _ statistics: HKStatistics) {
+        switch type {
+        case HKQuantityType.quantityType(forIdentifier: .heartRate):
+            let unit = HKUnit.count().unitDivided(by: .minute())
+            if let bpm = statistics.mostRecentQuantity()?.doubleValue(for: unit) {
+                heartRateStatus = "\(Int(bpm)) bpm"
+                if maxHeartRate > 0 { latestHeartRateFraction = bpm / maxHeartRate }
+            }
+        case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
+            if let kcal = statistics.sumQuantity()?.doubleValue(for: .kilocalorie()) {
+                activeEnergyStatus = "\(Int(kcal)) kcal"
+            }
+        case HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning):
+            if let meters = statistics.sumQuantity()?.doubleValue(for: .meter()) {
+                distanceStatus = Self.metersString(meters)
+                let seconds = currentElapsed
+                if seconds > 0 { latestWalkingSpeed = meters / seconds }
+            }
+        case HKQuantityType.quantityType(forIdentifier: .stepCount):
+            if let steps = statistics.sumQuantity()?.doubleValue(for: .count()) {
+                latestStepCount = Int(steps)
+                stepsStatus = "\(latestStepCount)"
+                let minutes = currentElapsed / 60
+                if minutes > 0 { latestCadence = steps / currentElapsed }
+            }
+        default:
+            break
+        }
+        updateBreakRisk()
+    }
+
+    // MARK: HKWorkoutSessionDelegate
+
+    func workoutSession(_ workoutSession: HKWorkoutSession,
+                        didChangeTo toState: HKWorkoutSessionState,
+                        from fromState: HKWorkoutSessionState,
+                        date: Date) {
+        if toState == .ended {
+            workoutBuilder?.endCollection(withEnd: date) { [weak self] _, _ in
+                self?.workoutBuilder?.finishWorkout { _, _ in }
+            }
+        }
+    }
+
+    func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.monitoringMessage = "The workout session ended unexpectedly."
+        }
     }
 }
+#endif
