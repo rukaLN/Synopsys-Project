@@ -1,4 +1,5 @@
 import SwiftUI
+import HealthKit
 
 struct ContentView: View {
     @StateObject private var healthManager = HealthKitManager()
@@ -55,9 +56,39 @@ struct ContentView: View {
                             .font(.title3).foregroundColor(.blue)
                     }
                     GridRow {
+                        Text("Elapsed Time:")
+                            .font(.title3).bold()
+                        Text(healthManager.elapsedTimeStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Break Risk:")
+                            .font(.title3).bold()
+                        Text(healthManager.riskScoreStatus)
+                            .font(.title3).bold().foregroundColor(.purple)
+                    }
+                    GridRow {
                         Text("Health Steadiness:")
                             .font(.title3).bold()
                         Text(healthManager.steadinessStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Asymmetry:")
+                            .font(.title3).bold()
+                        Text(healthManager.asymmetryStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Double Support:")
+                            .font(.title3).bold()
+                        Text(healthManager.doubleSupportStatus)
+                            .font(.title3).foregroundColor(.blue)
+                    }
+                    GridRow {
+                        Text("Step Length:")
+                            .font(.title3).bold()
+                        Text(healthManager.stepLengthStatus)
                             .font(.title3).foregroundColor(.blue)
                     }
                 }
@@ -67,7 +98,7 @@ struct ContentView: View {
                     if healthManager.isTracking {
                         healthManager.stopSession()
                     } else {
-                        healthManager.requestAuthorizationAndStart()
+                        Task { healthManager.requestAuthorizationAndStart() }
                     }
                 }) {
                     Text(healthManager.isTracking ? "Stop Monitoring" : "Start Live Track")
@@ -80,14 +111,18 @@ struct ContentView: View {
             .padding(30)
         }
         .background(Color(.systemBackground))
+        .onAppear {
+            HapticsManager.prepare()
+        }
         .alert(isPresented: $healthManager.triggersAlert) {
             Alert(
                 title: Text("Time to Rest!"),
                 message: Text(healthManager.alertMessage),
                 dismissButton: .default(Text("OK, I am sitting")) {
-                    healthManager.triggersAlert = false
+                    HapticsManager.prepare()
                 }
             )
         }
     }
 }
+
