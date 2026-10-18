@@ -845,7 +845,7 @@
 				INFOPLIST_KEY_NSHealthClinicalHealthRecordsShareUsageDescription = "Walking Buddy saves your completed walks to Apple Health as workouts, including distance, active energy, and heart rate, so you and your caregivers can track your weekly activity.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy reads your heart rate and movement to keep you safe on walks.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Walking buddy saves your walk as a workout.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Walking Buddy uses motion data to measure your walking pace and steadiness so it can detect fatigue and remind you to rest.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "Walking-Buddy.Walking-Buddy";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -884,7 +884,7 @@
 				INFOPLIST_KEY_NSHealthClinicalHealthRecordsShareUsageDescription = "Walking Buddy saves your completed walks to Apple Health as workouts, including distance, active energy, and heart rate, so you and your caregivers can track your weekly activity.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy reads your heart rate and movement to keep you safe on walks.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Walking buddy saves your walk as a workout.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Walking Buddy uses motion data to measure your walking pace and steadiness so it can detect fatigue and remind you to rest.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "Walking-Buddy.Walking-Buddy";
 				LD_RUNPATH_SEARCH_PATHS = (
