@@ -98,7 +98,7 @@ struct ContentView: View {
                     if healthManager.isTracking {
                         healthManager.stopSession()
                     } else {
-                        Task { healthManager.requestAuthorizationAndStart() }
+                        healthManager.requestAuthorizationAndStart()
                     }
                 }) {
                     Text(healthManager.isTracking ? "Stop Monitoring" : "Start Live Track")
@@ -118,9 +118,7 @@ struct ContentView: View {
             Alert(
                 title: Text("Time to Rest!"),
                 message: Text(healthManager.alertMessage),
-                dismissButton: .default(Text("OK, I am sitting")) {
-                    HapticsManager.prepare()
-                }
+                dismissButton: .default(Text("OK, I am sitting"))
             )
         }
     }
