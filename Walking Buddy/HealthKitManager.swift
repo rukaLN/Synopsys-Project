@@ -2,9 +2,12 @@ import Combine
 import HealthKit
 import SwiftUI
 import UserNotifications
+import WidgetKit
 
 #if os(iOS)
 import CoreMotion
+import CoreLocation
+import ActivityKit
 #endif
 
 /// Drives walking monitoring for both platforms.
@@ -51,9 +54,19 @@ final class HealthKitManager: NSObject, ObservableObject {
     private let notificationCenter = UNUserNotificationCenter.current()
     private let riskModel = BreakRiskModel()
 
+    /// App Group shared with the Lock Screen widget extension. Must match the
+    /// group ID enabled on both the app and widget targets in Xcode.
+    static let appGroupID = "group.Walking-Buddy.shared"
+
     private let maximumAlertFrequency: TimeInterval = 120
     /// Seniors are advised to rest after a continuous walk of this length.
     private let maximumWalkDuration: TimeInterval = 30 * 60
+
+    /// Hold time H: a metric must stay tripped this long continuously to alarm.
+    private let sustainedHoldDuration: TimeInterval = 3
+    /// First instant each metric crossed its trip threshold (reset when it drops
+    /// back below). Drives the sustained-dwell equation.
+    private var metricTripStart: [String: Date] = [:]
 
     // MARK: - Shared latest readings (inputs to the equation)
 
@@ -86,6 +99,11 @@ final class HealthKitManager: NSObject, ObservableObject {
     #if os(iOS)
     private let pedometer = CMPedometer()
     private var simulatorTimer: Timer?
+    private let locationManager = CLLocationManager()
+    private let gaitAnalyzer = GaitAnalyzer()
+    /// Holds an `Activity<WalkActivityAttributes>` while a walk is running.
+    /// Stored as `Any?` so the property doesn't need availability annotation.
+    private var liveActivity: Any?
     #endif
 
     // MARK: - watchOS-only workout state
@@ -117,6 +135,11 @@ final class HealthKitManager: NSObject, ObservableObject {
         riskScoreStatus = "0%"
         stopSensors()
         monitoringMessage = "Monitoring stopped."
+        publishWidgetSnapshot()
+
+        #if os(iOS)
+        if #available(iOS 16.2, *) { endLiveActivity() }
+        #endif
     }
 
     func pauseSession() {
@@ -125,6 +148,7 @@ final class HealthKitManager: NSObject, ObservableObject {
             accumulatedWalkTime += Date().timeIntervalSince(segmentStartDate)
         }
         segmentStartDate = nil
+        metricTripStart.removeAll()
         stopClock()
         stopSensors()
         monitoringMessage = "Monitoring paused. Data preserved."
@@ -143,6 +167,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         isTracking = true
         isPaused = false
         hasWarnedAboutLongWalk = false
+        metricTripStart.removeAll()
         accumulatedWalkTime = 0
         segmentStartDate = Date()
         stepsStatus = "0"
@@ -153,6 +178,10 @@ final class HealthKitManager: NSObject, ObservableObject {
 
         startClock()
         startSensors()
+
+        #if os(iOS)
+        if #available(iOS 16.2, *) { startLiveActivity() }
+        #endif
     }
 
     private func resetLatestReadings() {
@@ -163,6 +192,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestDoubleSupport = nil
         latestHeartRateFraction = nil
         latestStepCount = 0
+        metricTripStart.removeAll()
     }
 
     // MARK: - Duration clock (shared)
@@ -210,9 +240,68 @@ final class HealthKitManager: NSObject, ObservableObject {
 
         let result = riskModel.evaluate(inputs)
         riskScoreStatus = "\(Int((result.score * 100).rounded()))%"
+        publishWidgetSnapshot()
 
-        guard result.needsBreak else { return }
-        presentBreakAlert(message: breakMessage(from: result.reasons))
+        // Alarm only when a metric has stayed tripped for the full hold window.
+        let sustained = evaluateSustainedAlarm(result)
+        guard !sustained.isEmpty, latestStepCount >= riskModel.minimumStepsBeforeAlert else { return }
+        presentBreakAlert(message: breakMessage(from: sustained))
+    }
+
+    /// Applies the sustained-dwell equation: a metric must stay at or above the
+    /// trip threshold τ continuously for `sustainedHoldDuration` (H) before it
+    /// counts. Returns the reasons for every metric currently alarming.
+    ///
+    ///     Iₘ(t) = [ sₘ(t) ≥ τ ]
+    ///     Dₘ(t) = t − (last instant Iₘ was 0)
+    ///     Aₘ(t) = [ Iₘ(t)=1  ∧  Dₘ(t) ≥ H ]
+    private func evaluateSustainedAlarm(_ result: BreakRiskModel.Result) -> [String] {
+        let now = Date()
+        var alarmingReasons: [String] = []
+
+        for contribution in result.contributions {
+            if contribution.score >= riskModel.tripThreshold {
+                let start = metricTripStart[contribution.metric] ?? now
+                metricTripStart[contribution.metric] = start
+                if now.timeIntervalSince(start) >= sustainedHoldDuration {
+                    alarmingReasons.append(contribution.reason)
+                }
+            } else {
+                // Dropped below τ — reset this metric's dwell timer.
+                metricTripStart[contribution.metric] = nil
+            }
+        }
+
+        return alarmingReasons
+    }
+
+    /// Break risk as a plain integer, parsed from the "NN%" status string.
+    private var riskPercentInt: Int {
+        Int(riskScoreStatus.filter(\.isNumber)) ?? 0
+    }
+
+    /// Mirrors the current live metrics into the shared App Group so the
+    /// widgets / watch complications can display them, then asks WidgetKit to
+    /// refresh. On watchOS we additionally publish the live workout metrics
+    /// (heart rate, active energy). The App Group ID string is the same on
+    /// both platforms; each device keeps its own container.
+    private func publishWidgetSnapshot() {
+        guard let defaults = UserDefaults(suiteName: Self.appGroupID) else { return }
+        defaults.set(isTracking, forKey: "wb.isTracking")
+        defaults.set(riskPercentInt, forKey: "wb.risk")
+        defaults.set(stepsStatus, forKey: "wb.steps")
+        defaults.set(distanceStatus, forKey: "wb.distance")
+        defaults.set(elapsedTimeStatus, forKey: "wb.time")
+        #if os(watchOS)
+        defaults.set(heartRateStatus, forKey: "wb.heartRate")
+        defaults.set(activeEnergyStatus, forKey: "wb.energy")
+        #endif
+        defaults.set(Date(), forKey: "wb.updated")
+        WidgetCenter.shared.reloadAllTimelines()
+
+        #if os(iOS)
+        if #available(iOS 16.2, *) { updateLiveActivity() }
+        #endif
     }
 
     private func breakMessage(from reasons: [String]) -> String {
@@ -304,20 +393,84 @@ extension HealthKitManager {
         cadenceStatus = "Waiting for Data"
 
         refreshGaitBaseline()
+        startBackgroundLocation()
 
         #if targetEnvironment(simulator)
         startSimulatedWalkingUpdates()
         monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
         #else
         startPedometerUpdates(from: Date())
+        startLiveGaitAnalysis()
         #endif
+    }
+
+    /// Streams real-time gait estimates from the IMU into the live metrics,
+    /// overriding the frozen HealthKit baseline during the walk.
+    private func startLiveGaitAnalysis() {
+        guard gaitAnalyzer.isAvailable else { return }
+        gaitAnalyzer.onUpdate = { [weak self] metrics in
+            guard let self else { return }
+
+            if let steadiness = metrics.steadiness {
+                self.latestWalkingSteadiness = steadiness
+                self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness))
+                    ?? "\(Int(steadiness * 100))%"
+            }
+            if let asymmetry = metrics.asymmetry {
+                self.latestAsymmetry = asymmetry
+                self.asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: asymmetry))
+                    ?? "\(Int(asymmetry * 100))%"
+            }
+            if let doubleSupport = metrics.doubleSupport {
+                self.latestDoubleSupport = doubleSupport
+                self.doubleSupportStatus = Self.percentFormatter.string(from: NSNumber(value: doubleSupport))
+                    ?? "\(Int(doubleSupport * 100))%"
+            }
+            if let cadence = metrics.cadence {
+                self.latestCadence = cadence
+                self.cadenceStatus = "\(Int(cadence * 60)) steps/min"
+                // Live step length = speed / cadence when both are known.
+                if let speed = self.latestWalkingSpeed, cadence > 0 {
+                    self.stepLengthStatus = Self.metersString(speed / cadence)
+                }
+            }
+
+            self.updateBreakRisk()
+        }
+        gaitAnalyzer.start()
     }
 
     private func stopSensors() {
         pedometer.stopUpdates()
         pedometer.stopEventUpdates()
+        gaitAnalyzer.stop()
         simulatorTimer?.invalidate()
         simulatorTimer = nil
+        locationManager.stopUpdatingLocation()
+    }
+
+    /// Keeps the app alive with the screen off / backgrounded by running
+    /// low-power location updates. We don't use the coordinates — the live
+    /// signal just keeps the risk timer and pedometer updates flowing.
+    ///
+    /// Requires the "Location updates" background mode and Always-location
+    /// permission. `allowsBackgroundLocationUpdates` is only enabled once the
+    /// background mode is present, so the app won't crash before it's set up.
+    private func startBackgroundLocation() {
+        locationManager.delegate = self
+        locationManager.activityType = .fitness
+        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        locationManager.distanceFilter = kCLDistanceFilterNone
+        locationManager.pausesLocationUpdatesAutomatically = false
+        locationManager.requestAlwaysAuthorization()
+
+        let backgroundModes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        if backgroundModes.contains("location") {
+            locationManager.allowsBackgroundLocationUpdates = true
+            locationManager.showsBackgroundLocationIndicator = true
+        }
+
+        locationManager.startUpdatingLocation()
     }
 
     private func requestHealthAuthorization(completion: @escaping () -> Void) {
@@ -447,6 +600,54 @@ extension HealthKitManager {
             self.steadinessStatus = fatigueStarts ? "Low" : "OK"
             self.updateBreakRisk()
         }
+    }
+}
+
+// MARK: - Background keep-alive (location updates are intentionally unused)
+
+extension HealthKitManager: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {}
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+}
+
+// MARK: - Live Activity (Lock Screen + Dynamic Island, like a workout card)
+
+@available(iOS 16.2, *)
+extension HealthKitManager {
+
+    private var liveActivityState: WalkActivityAttributes.ContentState {
+        WalkActivityAttributes.ContentState(
+            risk: riskPercentInt,
+            steps: stepsStatus,
+            distance: distanceStatus,
+            time: elapsedTimeStatus
+        )
+    }
+
+    func startLiveActivity() {
+        guard liveActivity == nil,
+              ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        do {
+            liveActivity = try Activity.request(
+                attributes: WalkActivityAttributes(),
+                content: ActivityContent(state: liveActivityState, staleDate: nil)
+            )
+        } catch {
+            liveActivity = nil
+        }
+    }
+
+    func updateLiveActivity() {
+        guard let activity = liveActivity as? Activity<WalkActivityAttributes> else { return }
+        let state = liveActivityState
+        Task { await activity.update(ActivityContent(state: state, staleDate: nil)) }
+    }
+
+    func endLiveActivity() {
+        guard let activity = liveActivity as? Activity<WalkActivityAttributes> else { return }
+        let state = liveActivityState
+        liveActivity = nil
+        Task { await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .immediate) }
     }
 }
 #endif
