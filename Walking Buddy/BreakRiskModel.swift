@@ -19,7 +19,7 @@ struct BreakRiskModel {
     // norms for older adults. These are intentionally conservative.
     var safeWalkingSpeed = 0.8        // m/s   — below this is slow / unsafe
     var safeCadence = 1.2             // steps/s
-    var steadinessFloor = 0.5         // 0...1 — below this the gait is unsteady
+    var steadinessFloor = 0.6         // 0...1 — below this the gait is unsteady
     var normalAsymmetry = 0.05        // 5%    — above this steps are uneven
     var asymmetryCeiling = 0.20       // 20%   — fully "risky"
     var normalDoubleSupport = 0.30    // 30%   — typical is 20–40%
@@ -28,7 +28,11 @@ struct BreakRiskModel {
     var heartRateCeiling = 0.90
 
     /// Composite score at or above which we recommend a break.
-    var breakThreshold = 0.5
+    var breakThreshold = 0.45
+
+    /// Per-metric trip threshold τ: a single metric's sub-score at or above this
+    /// is considered "tripped" and starts its sustained-dwell timer.
+    var tripThreshold = 0.5
 
     /// Require a little walking before alerting, to avoid false positives at the
     /// very start of a session.
@@ -63,10 +67,18 @@ struct BreakRiskModel {
         var stepCount: Int = 0
     }
 
+    /// One metric's contribution on a single evaluation.
+    struct Contribution {
+        let metric: String
+        let score: Double            // 0...1 sub-score
+        let reason: String
+    }
+
     struct Result {
         var score: Double            // 0...1 composite risk
-        var reasons: [String]        // human-readable contributors
+        var reasons: [String]        // human-readable contributors (sub-score ≥ 0.5)
         var needsBreak: Bool
+        var contributions: [Contribution]   // every present metric's sub-score
     }
 
     // MARK: - Evaluation
@@ -75,12 +87,14 @@ struct BreakRiskModel {
         var weightedSum = 0.0
         var totalWeight = 0.0
         var reasons: [String] = []
+        var contributions: [Contribution] = []
 
         func contribute(_ metric: Metric, _ risk: Double?, reason: String) {
             guard let risk, let weight = weights[metric] else { return }
             let clamped = min(max(risk, 0), 1)
             weightedSum += clamped * weight
             totalWeight += weight
+            contributions.append(Contribution(metric: metric.rawValue, score: clamped, reason: reason))
             if clamped >= 0.5 {
                 reasons.append(reason)
             }
@@ -110,7 +124,7 @@ struct BreakRiskModel {
 
         let score = totalWeight > 0 ? weightedSum / totalWeight : 0
         let needsBreak = input.stepCount >= minimumStepsBeforeAlert && score >= breakThreshold
-        return Result(score: score, reasons: reasons, needsBreak: needsBreak)
+        return Result(score: score, reasons: reasons, needsBreak: needsBreak, contributions: contributions)
     }
 
     // MARK: - Sub-score helpers
