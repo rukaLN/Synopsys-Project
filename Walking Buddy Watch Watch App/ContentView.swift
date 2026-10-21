@@ -12,6 +12,20 @@ struct ContentView: View {
     private static let brandTeal = Color(red: 0.02, green: 0.62, blue: 0.47)
 
     var body: some View {
+        TabView {
+            monitor
+            WatchHistoryView()
+        }
+        .tabViewStyle(.verticalPage)
+        .onAppear { HapticsManager.prepare() }
+        .alert("Time to Rest!", isPresented: $healthManager.triggersAlert) {
+            Button("OK, I'll sit down") { }
+        } message: {
+            Text(healthManager.alertMessage)
+        }
+    }
+
+    private var monitor: some View {
         ScrollView {
             VStack(spacing: 12) {
                 HStack(spacing: 6) {
@@ -52,12 +66,6 @@ struct ContentView: View {
                 .tint(healthManager.isTracking ? .red : Self.brandTeal)
             }
             .padding(.horizontal, 4)
-        }
-        .onAppear { HapticsManager.prepare() }
-        .alert("Time to Rest!", isPresented: $healthManager.triggersAlert) {
-            Button("OK, I'll sit down") { }
-        } message: {
-            Text(healthManager.alertMessage)
         }
     }
 

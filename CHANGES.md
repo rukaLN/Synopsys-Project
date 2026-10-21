@@ -57,12 +57,19 @@ Everything added/changed recently, in one place. Branch: **New-main**
 - `HealthKitManager` starts/updates/ends the activity (iOS 16.2+). `NSSupportsLiveActivities`
   added to the app Info.plist.
 
-## 7. History & trend graph (added by partner — merged in)
-- **History tab** — `ContentView` is now a `TabView` (Monitor + History).
-- `HistoryView.swift` — **Swift Charts** graph of metric trends across past walks.
-- `WalkHistory.swift` — persists completed walks; `WalkTrends.swift` — trend series.
+## 7. History & trend graph (phone — added by partner; watch — added here)
+- **iPhone History tab** — `ContentView` is now a `TabView` (Monitor + History);
+  `HistoryView.swift` draws a **Swift Charts** graph of metric trends across past walks.
+- **Apple Watch history page** — `WatchHistoryView.swift`; the watch `ContentView` is now
+  a vertical-page `TabView` (Monitor + History) with a Swift Charts trend of a chosen
+  metric (risk / steadiness / cadence / heart rate) across recent walks.
+- `WalkHistory.swift` — persists completed walks and **syncs watch → iPhone** over
+  WatchConnectivity; `WalkTrends.swift` — trend series (phone).
 - `HealthKitManager` additions: `WalkRecorder` (saves each walk on Stop), a
   "notifications are off" banner, and idle / stopped-walking detection.
+
+> Note: the iPhone holds the complete history (its own walks + synced watch walks);
+> the watch page shows walks finished on the watch.
 
 ---
 
