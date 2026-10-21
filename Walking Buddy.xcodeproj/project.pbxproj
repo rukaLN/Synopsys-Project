@@ -110,6 +110,7 @@
 				BreakRiskModel.swift,
 				HapticsManager.swift,
 				HealthKitManager.swift,
+				WalkHistory.swift,
 			);
 			target = 35AFD042307B0EA500C643D5 /* Walking Buddy Watch Watch App */;
 		};
@@ -225,6 +226,7 @@
 				358141253085A4FA0085C2EE /* Walking Buddy iOS Widget */,
 				358141003085A1F00085C2EE /* Frameworks */,
 				35AA62F6301B041C0067AFD8 /* Products */,
+				A3FAEE8B308845F6004096CF /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -237,6 +239,15 @@
 				358141223085A4FA0085C2EE /* Walking Buddy iOS WidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A3FAEE8B308845F6004096CF /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				35A8C722305BA11B00443600 /* Walking Buddy.xcodeproj */,
+				35A8C704305B987100443600 /* Walking Buddy.xcodeproj */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
