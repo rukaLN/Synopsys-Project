@@ -83,6 +83,7 @@ final class HealthKitManager: NSObject, ObservableObject {
 
     private var latestWalkingSpeed: Double?
     private var latestCadence: Double?
+    private var latestStepLength: Double?
     private var latestWalkingSteadiness: Double?
     private var latestAsymmetry: Double?
     private var latestDoubleSupport: Double?
@@ -217,6 +218,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     private func resetLatestReadings() {
         latestWalkingSpeed = nil
         latestCadence = nil
+        latestStepLength = nil
         latestWalkingSteadiness = nil
         latestAsymmetry = nil
         latestDoubleSupport = nil
@@ -283,6 +285,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         let inputs = BreakRiskModel.Inputs(
             walkingSpeed: latestWalkingSpeed,
             cadence: latestCadence,
+            stepLength: latestStepLength,
             steadiness: latestWalkingSteadiness,
             asymmetry: latestAsymmetry,
             doubleSupport: latestDoubleSupport,
@@ -515,7 +518,9 @@ extension HealthKitManager {
                 self.cadenceStatus = "\(Int(cadence * 60)) steps/min"
                 // Live step length = speed / cadence when both are known.
                 if let speed = self.latestWalkingSpeed, cadence > 0 {
-                    self.stepLengthStatus = Self.metersString(speed / cadence)
+                    let length = speed / cadence
+                    self.latestStepLength = length
+                    self.stepLengthStatus = Self.metersString(length)
                 }
             }
 
@@ -649,7 +654,9 @@ extension HealthKitManager {
         }
         fetchMostRecent(.walkingStepLength, unit: .meter()) { [weak self] value in
             guard let self, let value else { return }
+            self.latestStepLength = value
             self.stepLengthStatus = Self.metersString(value)
+            self.updateBreakRisk()
         }
     }
 

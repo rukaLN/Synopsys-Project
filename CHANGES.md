@@ -47,6 +47,9 @@ Everything added/changed recently, in one place. Branch: **New-main**
 
 ## 4. Break-risk model + sustained-dwell alarm — `BreakRiskModel.swift`
 - Sensitivity bump: `steadinessFloor` 0.5→0.6, `breakThreshold` 0.5→0.45.
+- **Step length** now feeds the risk ring (shortens with fatigue; `safeStepLength` 0.55 m,
+  deficit sub-score, weight 1.0). Ring inputs: speed, cadence, step length, steadiness,
+  asymmetry, double-support, (+ heart-rate on watch) and duration.
 - **Sustained-dwell alarm, tied to the risk ring** — the alert fires when the
   **composite risk (the ring)** stays at/above the break threshold for **H = 3 s**:
   - `I(t) = [risk(t) ≥ breakThreshold]`, `D(t) = t − last instant I=0`,

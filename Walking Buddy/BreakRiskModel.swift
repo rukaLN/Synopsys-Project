@@ -19,6 +19,7 @@ struct BreakRiskModel {
     // norms for older adults. These are intentionally conservative.
     var safeWalkingSpeed = 0.8        // m/s   — below this is slow / unsafe
     var safeCadence = 1.2             // steps/s
+    var safeStepLength = 0.55         // m     — steps shorten ("shuffle") with fatigue
     var steadinessFloor = 0.6         // 0...1 — below this the gait is unsteady
     var normalAsymmetry = 0.05        // 5%    — above this steps are uneven
     var asymmetryCeiling = 0.20       // 20%   — fully "risky"
@@ -41,12 +42,13 @@ struct BreakRiskModel {
     // MARK: - Weights (relative importance of each signal)
 
     private enum Metric: String, CaseIterable {
-        case speed, cadence, steadiness, asymmetry, doubleSupport, heartRate, duration
+        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration
     }
 
     private let weights: [Metric: Double] = [
         .speed: 1.0,
         .cadence: 1.0,
+        .stepLength: 1.0,
         .steadiness: 1.5,
         .asymmetry: 1.2,
         .doubleSupport: 1.2,
@@ -59,6 +61,7 @@ struct BreakRiskModel {
     struct Inputs {
         var walkingSpeed: Double?        // m/s
         var cadence: Double?             // steps/s
+        var stepLength: Double?          // m
         var steadiness: Double?          // 0...1
         var asymmetry: Double?           // 0...1 (fraction)
         var doubleSupport: Double?       // 0...1 (fraction)
@@ -106,6 +109,9 @@ struct BreakRiskModel {
         contribute(.cadence,
                    input.cadence.map { deficit(value: $0, safe: safeCadence) },
                    reason: "step cadence has slowed")
+        contribute(.stepLength,
+                   input.stepLength.map { deficit(value: $0, safe: safeStepLength) },
+                   reason: "your steps are getting shorter")
         contribute(.steadiness,
                    input.steadiness.map { deficit(value: $0, safe: steadinessFloor) },
                    reason: "walking steadiness is low")
