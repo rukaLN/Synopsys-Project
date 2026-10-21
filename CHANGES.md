@@ -20,6 +20,12 @@ Everything added/changed recently, in one place. Branch: **New-main**
 - Capability: Background Modes → Location updates (`UIBackgroundModes: location` in
   `Walking-Buddy-Info.plist`) + Location usage strings. (Force-quitting still stops it.)
 
+## 2b. Interruption resilience (calls)
+- A FaceTime/phone call could stall `CMMotionManager` / the live pedometer, and they
+  don't auto-resume — tracking froze until the call ended. `HealthKitManager` now
+  re-primes the sensors on `UIApplication.didBecomeActive` during a walk and backfills
+  the pedometer from the original start date, so a call no longer freezes tracking.
+
 ## 3. Real-time gait analysis — `GaitAnalyzer.swift`
 - Reads device motion at ~50 Hz and derives **live** estimates (HealthKit gait metrics
   are passive/frozen during a walk):
