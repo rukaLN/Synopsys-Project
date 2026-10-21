@@ -26,6 +26,7 @@ struct ContentView: View {
                 message: Text(healthManager.alertMessage),
                 dismissButton: .default(Text("OK, I am sitting")) {
                     HapticsManager.prepare()
+                    healthManager.pauseSession()
                 }
             )
         }
@@ -80,7 +81,7 @@ struct ContentView: View {
 
     private var riskHero: some View {
         VStack(spacing: 18) {
-            StatusPill(isTracking: healthManager.isTracking)
+            StatusPill(isTracking: healthManager.isTracking, isPaused: healthManager.isPaused)
 
             RiskRing(
                 fraction: Double(riskValue) / 100,
@@ -116,36 +117,46 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var controlButton: some View {
-        Button {
-            if healthManager.isTracking {
+        if healthManager.isPaused {
+            // After "I am sitting" the walk is paused — resume or stop.
+            HStack(spacing: 12) {
+                pillButton("Resume", icon: "play.fill", gradient: Theme.brandGradient, glow: Theme.brandTeal) {
+                    healthManager.resumeSession()
+                }
+                pillButton("Stop", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
+                    healthManager.stopSession()
+                }
+            }
+        } else if healthManager.isTracking {
+            pillButton("Stop Monitoring", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
                 healthManager.stopSession()
-            } else {
+            }
+        } else {
+            pillButton("Start Live Track", icon: "figure.walk", gradient: Theme.brandGradient, glow: Theme.brandTeal) {
                 healthManager.requestAuthorizationAndStart()
             }
-        } label: {
-            Label(
-                healthManager.isTracking ? "Stop Monitoring" : "Start Live Track",
-                systemImage: healthManager.isTracking ? "stop.fill" : "figure.walk"
-            )
-            .font(.system(.title3, design: .rounded)).bold()
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 62)
-            .background(Capsule().fill(buttonGradient))
-            .shadow(color: (healthManager.isTracking ? Color.red : Theme.brandTeal).opacity(0.35), radius: 10, y: 5)
         }
     }
 
-    private var buttonGradient: LinearGradient {
-        if healthManager.isTracking {
-            return LinearGradient(
-                colors: [Color(red: 0.95, green: 0.33, blue: 0.33), Color(red: 0.80, green: 0.16, blue: 0.22)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
+    private func pillButton(_ title: String, icon: String, gradient: LinearGradient,
+                            glow: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.system(.title3, design: .rounded)).bold()
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 62)
+                .background(Capsule().fill(gradient))
+                .shadow(color: glow.opacity(0.35), radius: 10, y: 5)
         }
-        return Theme.brandGradient
     }
+
+    private static let stopGradient = LinearGradient(
+        colors: [Color(red: 0.95, green: 0.33, blue: 0.33), Color(red: 0.80, green: 0.16, blue: 0.22)],
+        startPoint: .topLeading, endPoint: .bottomTrailing
+    )
 
     // MARK: - Derived values
 
@@ -217,19 +228,30 @@ struct WalkingBuddyLogo: View {
 
 struct StatusPill: View {
     let isTracking: Bool
+    var isPaused: Bool = false
+
+    private var text: String {
+        if isPaused { return "Paused — Resting" }
+        return isTracking ? "Monitoring Live" : "Not Tracking"
+    }
+
+    private var color: Color {
+        if isPaused { return .orange }
+        return isTracking ? Theme.brandGreen : Color.secondary
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(isTracking ? Theme.brandGreen : Color.secondary)
+                .fill(color)
                 .frame(width: 9, height: 9)
-            Text(isTracking ? "Monitoring Live" : "Not Tracking")
+            Text(text)
                 .font(.subheadline).bold()
-                .foregroundStyle(isTracking ? Theme.brandTeal : Color.secondary)
+                .foregroundStyle(isPaused ? .orange : (isTracking ? Theme.brandTeal : Color.secondary))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
-        .background((isTracking ? Theme.brandGreen : Color.secondary).opacity(0.12), in: Capsule())
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
