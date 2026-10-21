@@ -47,12 +47,14 @@ Everything added/changed recently, in one place. Branch: **New-main**
 
 ## 4. Break-risk model + sustained-dwell alarm — `BreakRiskModel.swift`
 - Sensitivity bump: `steadinessFloor` 0.5→0.6, `breakThreshold` 0.5→0.45.
-- **Sustained-dwell alarm equation** — a metric must stay tripped continuously
-  for **H = 3 s** before it alerts:
-  - `Iₘ(t) = [sₘ(t) ≥ τ]`, `Dₘ(t) = t − last instant Iₘ=0`,
-    `Aₘ(t) = [Iₘ=1 ∧ Dₘ ≥ H]`, overall `A = (⋁ₘ Aₘ) ∧ [steps ≥ Nₘᵢₙ]`.
-  - τ = `tripThreshold` (0.5), H = `sustainedHoldDuration` (3 s). Timers reset on
-    recovery, start, stop, and pause. Alert names the exact metric(s) that held.
+- **Sustained-dwell alarm, tied to the risk ring** — the alert fires when the
+  **composite risk (the ring)** stays at/above the break threshold for **H = 3 s**:
+  - `I(t) = [risk(t) ≥ breakThreshold]`, `D(t) = t − last instant I=0`,
+    `Alarm = [I=1 ∧ D ≥ H] ∧ isWalking ∧ hasWalkedEnough`.
+  - `breakThreshold` = 0.45, H = `sustainedHoldDuration` (3 s). Timer resets on
+    recovery, resting, start, stop, pause. (Using the composite also removes the old
+    "duration alone trips at 15 min" false alarm.) Alert message names the metrics
+    that were elevated (`result.reasons`).
 - **Rest flow:** tapping "I am sitting" on the break alert now **pauses** the walk
   (keeps elapsed time/stats); the screen then offers **Resume** or **Stop**. The status
   pill shows "Paused — Resting". Works on both iPhone and Apple Watch.
