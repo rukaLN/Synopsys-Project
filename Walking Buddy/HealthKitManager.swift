@@ -33,6 +33,9 @@ final class HealthKitManager: NSObject, ObservableObject {
     @Published var triggersAlert = false
     /// True when notifications are switched off, so alerts only reach the user while the app is open.
     @Published var notificationsDenied = false
+    /// True while a walk is running but location isn't "Always" — background tracking
+    /// (screen off / during calls) needs Always to stay alive.
+    @Published var locationNeedsAlways = false
 
     @Published var stepsStatus = "0"
     @Published var distanceStatus = "0 m"
@@ -713,6 +716,29 @@ extension HealthKitManager {
 extension HealthKitManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {}
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        refreshLocationStatus()
+        // If the user upgraded to Always while walking, light up background updates.
+        if manager.authorizationStatus == .authorizedAlways {
+            let backgroundModes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+            if backgroundModes.contains("location") {
+                manager.allowsBackgroundLocationUpdates = true
+            }
+        }
+    }
+
+    /// Flags "needs Always" once the user has chosen anything other than Always
+    /// (While-Using, Denied, Restricted). `.notDetermined` is ignored because the
+    /// Start prompt is still pending.
+    func refreshLocationStatus() {
+        switch locationManager.authorizationStatus {
+        case .authorizedWhenInUse, .denied, .restricted:
+            locationNeedsAlways = true
+        default:
+            locationNeedsAlways = false
+        }
+    }
 }
 
 // MARK: - Live Activity (Lock Screen + Dynamic Island, like a workout card)

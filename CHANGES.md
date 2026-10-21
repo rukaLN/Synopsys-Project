@@ -20,6 +20,14 @@ Everything added/changed recently, in one place. Branch: **New-main**
 - Capability: Background Modes → Location updates (`UIBackgroundModes: location` in
   `Walking-Buddy-Info.plist`) + Location usage strings. (Force-quitting still stops it.)
 
+## 2a. Always-location nudge (only during a workout)
+- Location is requested/used **only when a walk starts** (and stops on Stop).
+- On Start we request **Always**; if the user is on "While Using" / Denied, the Monitor
+  screen shows a banner explaining why Always is needed, tapping through to Settings.
+- `locationManagerDidChangeAuthorization` turns on background updates the moment the
+  user upgrades to Always. (iOS always offers "While Using" in its own prompt — that
+  can't be removed — so the banner is how we steer users to Always.)
+
 ## 2b. Interruption resilience (calls)
 - A FaceTime/phone call could stall `CMMotionManager` / the live pedometer, and they
   don't auto-resume — tracking froze until the call ended. `HealthKitManager` now

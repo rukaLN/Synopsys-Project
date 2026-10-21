@@ -39,6 +39,7 @@ struct ContentView: View {
             VStack(spacing: 22) {
                 header
                 if healthManager.notificationsDenied { notificationsBanner }
+                if healthManager.isTracking && healthManager.locationNeedsAlways { locationBanner }
                 riskHero
                 metricsGrid
                 controlButton
@@ -55,6 +56,21 @@ struct ContentView: View {
         } label: {
             Label("Notifications are off, so you won't be alerted while the phone is locked. Tap to turn them on.",
                   systemImage: "bell.slash.fill")
+                .font(.footnote).bold()
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.white)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var locationBanner: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        } label: {
+            Label("Set Location to \u{201C}Always\u{201D} so Walking Buddy keeps monitoring during a call or with the screen off. Tap to fix.",
+                  systemImage: "location.slash.fill")
                 .font(.footnote).bold()
                 .multilineTextAlignment(.leading)
                 .foregroundStyle(.white)
