@@ -19,7 +19,7 @@ struct ContentView: View {
         .tabViewStyle(.verticalPage)
         .onAppear { HapticsManager.prepare() }
         .alert("Time to Rest!", isPresented: $healthManager.triggersAlert) {
-            Button("OK, I'll sit down") { }
+            Button("OK, I'll sit down") { healthManager.pauseSession() }
         } message: {
             Text(healthManager.alertMessage)
         }
@@ -52,18 +52,34 @@ struct ContentView: View {
                     metricRow("Time", healthManager.elapsedTimeStatus)
                 }
 
-                Button {
-                    if healthManager.isTracking {
-                        healthManager.stopSession()
-                    } else {
-                        healthManager.requestAuthorizationAndStart()
+                if healthManager.isPaused {
+                    // After "I'll sit down" the walk is paused — resume or stop.
+                    Button {
+                        healthManager.resumeSession()
+                    } label: {
+                        Label("Resume", systemImage: "play.fill").frame(maxWidth: .infinity)
                     }
-                } label: {
-                    Label(healthManager.isTracking ? "Stop" : "Start Walk",
-                          systemImage: healthManager.isTracking ? "stop.fill" : "figure.walk")
-                        .frame(maxWidth: .infinity)
+                    .tint(Self.brandTeal)
+                    Button {
+                        healthManager.stopSession()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                    }
+                    .tint(.red)
+                } else {
+                    Button {
+                        if healthManager.isTracking {
+                            healthManager.stopSession()
+                        } else {
+                            healthManager.requestAuthorizationAndStart()
+                        }
+                    } label: {
+                        Label(healthManager.isTracking ? "Stop" : "Start Walk",
+                              systemImage: healthManager.isTracking ? "stop.fill" : "figure.walk")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .tint(healthManager.isTracking ? .red : Self.brandTeal)
                 }
-                .tint(healthManager.isTracking ? .red : Self.brandTeal)
             }
             .padding(.horizontal, 4)
         }

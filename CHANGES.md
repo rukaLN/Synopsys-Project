@@ -39,6 +39,9 @@ Everything added/changed recently, in one place. Branch: **New-main**
     `Aₘ(t) = [Iₘ=1 ∧ Dₘ ≥ H]`, overall `A = (⋁ₘ Aₘ) ∧ [steps ≥ Nₘᵢₙ]`.
   - τ = `tripThreshold` (0.5), H = `sustainedHoldDuration` (3 s). Timers reset on
     recovery, start, stop, and pause. Alert names the exact metric(s) that held.
+- **Rest flow:** tapping "I am sitting" on the break alert now **pauses** the walk
+  (keeps elapsed time/stats); the screen then offers **Resume** or **Stop**. The status
+  pill shows "Paused — Resting". Works on both iPhone and Apple Watch.
 
 ## 5. Widgets
 - **iPhone widget** (`Walking Buddy iOS Widget/WalkingBuddyWidget.swift`) — Lock Screen
