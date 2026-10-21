@@ -30,6 +30,8 @@ final class HealthKitManager: NSObject, ObservableObject {
     @Published var monitoringMessage = "Start monitoring when the senior begins walking."
     @Published var alertMessage = "Your walking pattern suggests fatigue. Please find a safe place to sit down for a few minutes."
     @Published var triggersAlert = false
+    /// True when notifications are switched off, so alerts only reach the user while the app is open.
+    @Published var notificationsDenied = false
 
     @Published var stepsStatus = "0"
     @Published var distanceStatus = "0 m"
@@ -58,7 +60,11 @@ final class HealthKitManager: NSObject, ObservableObject {
     /// group ID enabled on both the app and widget targets in Xcode.
     static let appGroupID = "group.Walking-Buddy.shared"
 
-    private let maximumAlertFrequency: TimeInterval = 120
+    /// While a metric stays tripped the alert repeats this often. Recovering, or
+    /// stopping to rest, re-arms it so the next trip always alerts straight away.
+    private let alertRepeatInterval: TimeInterval = 120
+    /// No new steps or distance for this long means the person has stopped walking.
+    private let idleThreshold: TimeInterval = 15
     /// Seniors are advised to rest after a continuous walk of this length.
     private let maximumWalkDuration: TimeInterval = 30 * 60
 
@@ -76,15 +82,28 @@ final class HealthKitManager: NSObject, ObservableObject {
     private var latestAsymmetry: Double?
     private var latestDoubleSupport: Double?
     private var latestHeartRateFraction: Double?
-    private var latestStepCount = 0
+    private var latestHeartRate: Double?
+    private var latestRisk = 0.0
+    private var latestStepCount = 0 { didSet { if latestStepCount > oldValue { lastMovementDate = Date() } } }
+    private var latestDistance = 0.0 { didSet { if latestDistance > oldValue { lastMovementDate = Date() } } }
+    private var lastMovementDate = Date()
     private var lastAlertDate: Date?
+    private var recorder = WalkRecorder()
+
+    private var isWalking: Bool { Date().timeIntervalSince(lastMovementDate) < idleThreshold }
+
+    /// Enough walking to trust the readings: steps, or distance (~0.7 m a step) where a sensor doesn't report steps.
+    private var hasWalkedEnough: Bool {
+        latestStepCount >= riskModel.minimumStepsBeforeAlert
+            || latestDistance >= Double(riskModel.minimumStepsBeforeAlert) * 0.7
+    }
 
     // MARK: - Duration tracking
 
     private var clockTimer: Timer?
     private var accumulatedWalkTime: TimeInterval = 0
     private var segmentStartDate: Date?
-    private var hasWarnedAboutLongWalk = false
+    private var nextLongWalkWarning: TimeInterval = .infinity
 
     private var currentElapsed: TimeInterval {
         var total = accumulatedWalkTime
@@ -124,6 +143,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     }
 
     func stopSession() {
+        let saved = saveWalk()
         isTracking = false
         isPaused = false
         triggersAlert = false
@@ -134,7 +154,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         elapsedTimeStatus = "0:00"
         riskScoreStatus = "0%"
         stopSensors()
-        monitoringMessage = "Monitoring stopped."
+        monitoringMessage = saved ? "Monitoring stopped. Walk saved to History." : "Monitoring stopped."
         publishWidgetSnapshot()
 
         #if os(iOS)
@@ -158,6 +178,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         isPaused = false
         isTracking = true
         segmentStartDate = Date()
+        lastMovementDate = Date()
         startClock()
         startSensors()
         monitoringMessage = "Resumed live monitoring."
@@ -166,7 +187,10 @@ final class HealthKitManager: NSObject, ObservableObject {
     private func startSession() {
         isTracking = true
         isPaused = false
-        hasWarnedAboutLongWalk = false
+        nextLongWalkWarning = maximumWalkDuration
+        lastAlertDate = nil
+        lastMovementDate = Date()
+        recorder = WalkRecorder()
         metricTripStart.removeAll()
         accumulatedWalkTime = 0
         segmentStartDate = Date()
@@ -191,17 +215,30 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestAsymmetry = nil
         latestDoubleSupport = nil
         latestHeartRateFraction = nil
+        latestHeartRate = nil
+        latestRisk = 0
         latestStepCount = 0
+        latestDistance = 0
         metricTripStart.removeAll()
+    }
+
+    /// Stores the finished walk in History. Accidental starts (hardly any walking) are ignored.
+    private func saveWalk() -> Bool {
+        guard isTracking, hasWalkedEnough else { return false }
+        WalkHistory.shared.add(recorder.finish(duration: currentElapsed, steps: latestStepCount, distance: latestDistance))
+        return true
     }
 
     // MARK: - Duration clock (shared)
 
     private func startClock() {
         clockTimer?.invalidate()
-        clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        // `.common` keeps the clock (and so the alerts) running while the screen is being scrolled.
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             self?.tickClock()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        clockTimer = timer
     }
 
     private func stopClock() {
@@ -213,15 +250,25 @@ final class HealthKitManager: NSObject, ObservableObject {
         elapsedTimeStatus = Self.durationFormatter.string(from: currentElapsed) ?? "0:00"
         checkWalkDuration()
         updateBreakRisk()
+        sampleWalk()
     }
 
+    /// Warns again after every further `maximumWalkDuration` of walking, not just the first.
     private func checkWalkDuration() {
-        guard !hasWarnedAboutLongWalk, currentElapsed >= maximumWalkDuration else { return }
-        hasWarnedAboutLongWalk = true
-        let minutes = Int(maximumWalkDuration / 60)
+        guard currentElapsed >= nextLongWalkWarning else { return }
+        nextLongWalkWarning = (floor(currentElapsed / maximumWalkDuration) + 1) * maximumWalkDuration
+        let minutes = Int((currentElapsed / 60).rounded())
         presentBreakAlert(
             message: "You have been walking for about \(minutes) minutes. Please find a safe place to sit down and rest."
         )
+    }
+
+    /// One reading a second while walking, so time spent standing still doesn't dilute the walk's averages.
+    private func sampleWalk() {
+        guard isWalking else { return }
+        recorder.sample(risk: latestRisk, speed: latestWalkingSpeed, cadence: latestCadence,
+                        steadiness: latestWalkingSteadiness, asymmetry: latestAsymmetry,
+                        doubleSupport: latestDoubleSupport, heartRate: latestHeartRate)
     }
 
     // MARK: - The "needs a break" equation (shared)
@@ -239,12 +286,23 @@ final class HealthKitManager: NSObject, ObservableObject {
         )
 
         let result = riskModel.evaluate(inputs)
+        latestRisk = result.score
         riskScoreStatus = "\(Int((result.score * 100).rounded()))%"
         publishWidgetSnapshot()
 
-        // Alarm only when a metric has stayed tripped for the full hold window.
-        let sustained = evaluateSustainedAlarm(result)
-        guard !sustained.isEmpty, latestStepCount >= riskModel.minimumStepsBeforeAlert else { return }
+        // Alarm only when a metric has stayed tripped for the full hold window
+        // while the person is actually walking (stale readings from a rest don't count).
+        var sustained: [String] = []
+        if isWalking {
+            sustained = evaluateSustainedAlarm(result)
+        } else {
+            metricTripStart.removeAll()
+        }
+        guard !sustained.isEmpty, hasWalkedEnough else {
+            lastAlertDate = nil     // recovered or resting: the next trip alerts immediately
+            return
+        }
+        if let lastAlertDate, Date().timeIntervalSince(lastAlertDate) < alertRepeatInterval { return }
         presentBreakAlert(message: breakMessage(from: sustained))
     }
 
@@ -313,33 +371,27 @@ final class HealthKitManager: NSObject, ObservableObject {
 
     // MARK: - Alerting (shared)
 
+    /// Every alert reaches the user three ways: a haptic, the in-app alert (screen on) and a
+    /// notification (phone locked or app in the background). Repeats are paced by the callers.
     private func presentBreakAlert(message: String) {
+        lastAlertDate = Date()
+        recorder.alerts += 1
         alertMessage = message
-        if !triggersAlert {
-            HapticsManager.strongAlert()
-        }
         triggersAlert = true
-        scheduleBreakNotificationIfNeeded(message: message)
+        HapticsManager.strongAlert()
+        sendBreakNotification(message: message)
     }
 
-    private func scheduleBreakNotificationIfNeeded(message: String) {
-        let now = Date()
-        if let lastAlertDate, now.timeIntervalSince(lastAlertDate) < maximumAlertFrequency {
-            return
-        }
-        lastAlertDate = now
-
+    private func sendBreakNotification(message: String) {
         let content = UNMutableNotificationContent()
         content.title = "Time to Take a Break"
         content.body = "\(message)\n\(currentMetricsSummary())"
         content.sound = .default
+        content.threadIdentifier = "walking-break"
+        // Cuts through Focus modes once the "Time Sensitive Notifications" capability is added in Xcode.
+        content.interruptionLevel = .timeSensitive
 
-        let request = UNNotificationRequest(
-            identifier: "walking-break-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-        notificationCenter.add(request)
+        notificationCenter.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     private func currentMetricsSummary() -> String {
@@ -347,7 +399,15 @@ final class HealthKitManager: NSObject, ObservableObject {
     }
 
     private func requestNotificationAuthorization() {
-        notificationCenter.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        notificationCenter.requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in
+            self?.refreshNotificationStatus()
+        }
+    }
+
+    func refreshNotificationStatus() {
+        notificationCenter.getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async { self?.notificationsDenied = settings.authorizationStatus == .denied }
+        }
     }
 
     // MARK: - Formatters (shared)
@@ -521,6 +581,7 @@ extension HealthKitManager {
         stepsStatus = "\(latestStepCount)"
 
         if let distance = data.distance?.doubleValue {
+            latestDistance = distance
             distanceStatus = Self.metersString(distance)
         }
 
@@ -583,21 +644,31 @@ extension HealthKitManager {
     private func startSimulatedWalkingUpdates() {
         simulatorTimer?.invalidate()
         var elapsedSeconds = 0
+        var steps = 0.0
+        var distance = 0.0
         simulatorTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
             elapsedSeconds += 1
-            let fatigueStarts = elapsedSeconds > 20
-            let speed = fatigueStarts ? 0.62 : 1.05
-            let cadence = fatigueStarts ? 0.95 : 1.45
+            // Fresh for 20 s, then tired for 40 s, repeating — so the alert can be seen firing again and again.
+            let tired = elapsedSeconds % 60 >= 20
+            let speed = tired ? 0.62 : 1.05
+            let cadence = tired ? 0.95 : 1.45
+            steps += cadence
+            distance += speed
             self.latestWalkingSpeed = speed
             self.latestCadence = cadence
-            self.latestStepCount = Int(Double(elapsedSeconds) * cadence)
-            self.latestWalkingSteadiness = fatigueStarts ? 0.35 : 0.75
+            self.latestStepCount = Int(steps)
+            self.latestDistance = distance
+            self.latestWalkingSteadiness = tired ? 0.25 : 0.75
+            self.latestAsymmetry = tired ? 0.14 : 0.04
+            self.latestDoubleSupport = tired ? 0.40 : 0.28
             self.stepsStatus = "\(self.latestStepCount)"
-            self.distanceStatus = Self.metersString(Double(elapsedSeconds) * speed)
+            self.distanceStatus = Self.metersString(distance)
             self.currentPaceStatus = Self.speedString(speed)
             self.cadenceStatus = "\(Int(cadence * 60)) steps/min"
-            self.steadinessStatus = fatigueStarts ? "Low" : "OK"
+            self.steadinessStatus = tired ? "Low" : "OK"
+            self.asymmetryStatus = tired ? "14%" : "4%"
+            self.doubleSupportStatus = tired ? "40%" : "28%"
             self.updateBreakRisk()
         }
     }
@@ -742,6 +813,7 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
         case HKQuantityType.quantityType(forIdentifier: .heartRate):
             let unit = HKUnit.count().unitDivided(by: .minute())
             if let bpm = statistics.mostRecentQuantity()?.doubleValue(for: unit) {
+                latestHeartRate = bpm
                 heartRateStatus = "\(Int(bpm)) bpm"
                 if maxHeartRate > 0 { latestHeartRateFraction = bpm / maxHeartRate }
             }
@@ -751,6 +823,7 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             }
         case HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning):
             if let meters = statistics.sumQuantity()?.doubleValue(for: .meter()) {
+                latestDistance = meters
                 distanceStatus = Self.metersString(meters)
                 let seconds = currentElapsed
                 if seconds > 0 { latestWalkingSpeed = meters / seconds }

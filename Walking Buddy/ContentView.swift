@@ -5,19 +5,20 @@ struct ContentView: View {
     @StateObject private var healthManager = HealthKitManager()
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                header
-                riskHero
-                metricsGrid
-                controlButton
-            }
-            .padding(20)
-            .padding(.bottom, 12)
+        // The alert sits on the TabView so it appears whichever tab is showing.
+        TabView {
+            monitor
+                .tabItem { Label("Monitor", systemImage: "figure.walk") }
+            HistoryView()
+                .tabItem { Label("History", systemImage: "chart.line.uptrend.xyaxis") }
         }
-        .background(Theme.background.ignoresSafeArea())
+        .tint(Theme.brandTeal)
         .onAppear {
             HapticsManager.prepare()
+            healthManager.refreshNotificationStatus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            healthManager.refreshNotificationStatus()
         }
         .alert(isPresented: $healthManager.triggersAlert) {
             Alert(
@@ -31,6 +32,36 @@ struct ContentView: View {
     }
 
     // MARK: - Sections
+
+    private var monitor: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                header
+                if healthManager.notificationsDenied { notificationsBanner }
+                riskHero
+                metricsGrid
+                controlButton
+            }
+            .padding(20)
+            .padding(.bottom, 12)
+        }
+        .background(Theme.background.ignoresSafeArea())
+    }
+
+    private var notificationsBanner: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        } label: {
+            Label("Notifications are off, so you won't be alerted while the phone is locked. Tap to turn them on.",
+                  systemImage: "bell.slash.fill")
+                .font(.footnote).bold()
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.white)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
 
     private var header: some View {
         HStack(spacing: 14) {
