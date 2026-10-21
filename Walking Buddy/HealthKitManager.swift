@@ -72,11 +72,12 @@ final class HealthKitManager: NSObject, ObservableObject {
     /// Seniors are advised to rest after a continuous walk of this length.
     private let maximumWalkDuration: TimeInterval = 30 * 60
 
-    /// Hold time H: a metric must stay tripped this long continuously to alarm.
+    /// Hold time H: the risk ring must stay at/above the break threshold this long
+    /// continuously to alarm.
     private let sustainedHoldDuration: TimeInterval = 3
-    /// First instant each metric crossed its trip threshold (reset when it drops
-    /// back below). Drives the sustained-dwell equation.
-    private var metricTripStart: [String: Date] = [:]
+    /// First instant the composite risk (the ring) crossed the break threshold
+    /// (reset when it drops back below). Drives the sustained-dwell equation.
+    private var riskTripStart: Date?
 
     // MARK: - Shared latest readings (inputs to the equation)
 
@@ -173,7 +174,7 @@ final class HealthKitManager: NSObject, ObservableObject {
             accumulatedWalkTime += Date().timeIntervalSince(segmentStartDate)
         }
         segmentStartDate = nil
-        metricTripStart.removeAll()
+        riskTripStart = nil
         stopClock()
         stopSensors()
         monitoringMessage = "Monitoring paused. Data preserved."
@@ -196,7 +197,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         lastAlertDate = nil
         lastMovementDate = Date()
         recorder = WalkRecorder()
-        metricTripStart.removeAll()
+        riskTripStart = nil
         accumulatedWalkTime = 0
         segmentStartDate = Date()
         stepsStatus = "0"
@@ -224,7 +225,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestRisk = 0
         latestStepCount = 0
         latestDistance = 0
-        metricTripStart.removeAll()
+        riskTripStart = nil
     }
 
     /// Stores the finished walk in History. Accidental starts (hardly any walking) are ignored.
@@ -295,47 +296,34 @@ final class HealthKitManager: NSObject, ObservableObject {
         riskScoreStatus = "\(Int((result.score * 100).rounded()))%"
         publishWidgetSnapshot()
 
-        // Alarm only when a metric has stayed tripped for the full hold window
-        // while the person is actually walking (stale readings from a rest don't count).
-        var sustained: [String] = []
-        if isWalking {
-            sustained = evaluateSustainedAlarm(result)
-        } else {
-            metricTripStart.removeAll()
+        // Alarm when the risk ring itself stays at/above the break threshold for
+        // the full hold window, while the person is actually walking (stale
+        // readings from a rest don't count).
+        //
+        //     I(t) = [ risk(t) ≥ breakThreshold ]
+        //     D(t) = t − (last instant I was 0)
+        //     Alarm = [ I(t)=1  ∧  D(t) ≥ H ]
+        guard isWalking else {
+            riskTripStart = nil
+            return
         }
-        guard !sustained.isEmpty, hasWalkedEnough else {
-            lastAlertDate = nil     // recovered or resting: the next trip alerts immediately
+
+        let sustained: Bool
+        if result.score >= riskModel.breakThreshold {
+            let start = riskTripStart ?? Date()
+            riskTripStart = start
+            sustained = Date().timeIntervalSince(start) >= sustainedHoldDuration
+        } else {
+            riskTripStart = nil
+            sustained = false
+        }
+
+        guard sustained, hasWalkedEnough else {
+            if !sustained { lastAlertDate = nil }   // recovered or resting: next trip alerts immediately
             return
         }
         if let lastAlertDate, Date().timeIntervalSince(lastAlertDate) < alertRepeatInterval { return }
-        presentBreakAlert(message: breakMessage(from: sustained))
-    }
-
-    /// Applies the sustained-dwell equation: a metric must stay at or above the
-    /// trip threshold τ continuously for `sustainedHoldDuration` (H) before it
-    /// counts. Returns the reasons for every metric currently alarming.
-    ///
-    ///     Iₘ(t) = [ sₘ(t) ≥ τ ]
-    ///     Dₘ(t) = t − (last instant Iₘ was 0)
-    ///     Aₘ(t) = [ Iₘ(t)=1  ∧  Dₘ(t) ≥ H ]
-    private func evaluateSustainedAlarm(_ result: BreakRiskModel.Result) -> [String] {
-        let now = Date()
-        var alarmingReasons: [String] = []
-
-        for contribution in result.contributions {
-            if contribution.score >= riskModel.tripThreshold {
-                let start = metricTripStart[contribution.metric] ?? now
-                metricTripStart[contribution.metric] = start
-                if now.timeIntervalSince(start) >= sustainedHoldDuration {
-                    alarmingReasons.append(contribution.reason)
-                }
-            } else {
-                // Dropped below τ — reset this metric's dwell timer.
-                metricTripStart[contribution.metric] = nil
-            }
-        }
-
-        return alarmingReasons
+        presentBreakAlert(message: breakMessage(from: result.reasons))
     }
 
     /// Break risk as a plain integer, parsed from the "NN%" status string.
