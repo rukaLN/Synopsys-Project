@@ -8,6 +8,7 @@ import WidgetKit
 import CoreMotion
 import CoreLocation
 import ActivityKit
+import UIKit
 #endif
 
 /// Drives walking monitoring for both platforms.
@@ -118,6 +119,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     #if os(iOS)
     private let pedometer = CMPedometer()
     private var simulatorTimer: Timer?
+    private var pedometerStart: Date?
     private let locationManager = CLLocationManager()
     private let gaitAnalyzer = GaitAnalyzer()
     /// Holds an `Activity<WalkActivityAttributes>` while a walk is running.
@@ -454,13 +456,44 @@ extension HealthKitManager {
 
         refreshGaitBaseline()
         startBackgroundLocation()
+        observeForegroundReturn()
 
         #if targetEnvironment(simulator)
         startSimulatedWalkingUpdates()
         monitoringMessage = "Using simulated walking data. Test live sensors on a real iPhone."
         #else
-        startPedometerUpdates(from: Date())
+        pedometerStart = Date()
+        startPedometerUpdates(from: pedometerStart ?? Date())
         startLiveGaitAnalysis()
+        #endif
+    }
+
+    /// A phone call (e.g. FaceTime), Control Center, or any interruption can
+    /// stall `CMMotionManager` / live pedometer updates and they don't auto-resume.
+    /// When the app returns to the foreground mid-walk we re-prime the sensors so
+    /// tracking stays smooth instead of freezing until the call ends.
+    private func observeForegroundReturn() {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
+    }
+
+    @objc private func appDidBecomeActive() {
+        guard isTracking, !isPaused else { return }
+        resyncSensors()
+    }
+
+    /// Restarts the live sensors, backfilling any steps/distance missed while the
+    /// app was interrupted (the pedometer query runs from the original start date).
+    private func resyncSensors() {
+        gaitAnalyzer.stop()
+        startLiveGaitAnalysis()
+
+        #if !targetEnvironment(simulator)
+        pedometer.stopUpdates()
+        startPedometerUpdates(from: pedometerStart ?? Date())
         #endif
     }
 
@@ -501,6 +534,7 @@ extension HealthKitManager {
     }
 
     private func stopSensors() {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
         pedometer.stopUpdates()
         pedometer.stopEventUpdates()
         gaitAnalyzer.stop()
