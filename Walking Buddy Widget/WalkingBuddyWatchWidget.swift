@@ -21,14 +21,18 @@ private enum WatchWidgetData {
 
     static func load() -> WatchEntry {
         let defaults = UserDefaults(suiteName: appGroupID)
-        return WatchEntry(
+        let isTracking = defaults?.bool(forKey: "wb.isTracking") ?? false
+        var entry = WatchEntry(
             date: Date(),
-            isTracking: defaults?.bool(forKey: "wb.isTracking") ?? false,
+            isTracking: isTracking,
             risk: defaults?.integer(forKey: "wb.risk") ?? 0,
             heartRate: defaults?.string(forKey: "wb.heartRate") ?? "–",
             steps: defaults?.string(forKey: "wb.steps") ?? "0",
             time: defaults?.string(forKey: "wb.time") ?? "0:00"
         )
+        // Float the widget to the top of the Smart Stack while a walk is live.
+        entry.relevance = TimelineEntryRelevance(score: isTracking ? 100 : 10)
+        return entry
     }
 }
 
@@ -39,6 +43,7 @@ struct WatchEntry: TimelineEntry {
     let heartRate: String
     let steps: String
     let time: String
+    var relevance: TimelineEntryRelevance? = nil
 
     static let placeholder = WatchEntry(
         date: .now, isTracking: true, risk: 32, heartRate: "96 bpm", steps: "1,240", time: "12:30"
@@ -108,17 +113,27 @@ struct WatchWidgetEntryView: View {
             Label("Break risk \(entry.risk)%", systemImage: "figure.walk")
 
         case .accessoryRectangular:
-            VStack(alignment: .leading, spacing: 2) {
-                Label(entry.isTracking ? "Monitoring" : "Walking Buddy", systemImage: "figure.walk")
-                    .font(.caption).bold()
-                    .widgetAccentable()
-                Text("Break risk \(entry.risk)%")
-                    .font(.headline)
-                Text("\(entry.heartRate) · \(entry.time)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Gauge(value: fraction, in: 0...100) {
+                    Image(systemName: "figure.walk")
+                } currentValueLabel: {
+                    Text("\(entry.risk)")
+                }
+                .gaugeStyle(.accessoryCircular)
+                .tint(riskColor(entry.risk))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.isTracking ? "Monitoring" : "Walking Buddy")
+                        .font(.caption).bold()
+                        .widgetAccentable()
+                    Text("Break risk \(entry.risk)%")
+                        .font(.caption2)
+                    Text("\(entry.heartRate) · \(entry.time)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
         default:
             Gauge(value: fraction, in: 0...100) {

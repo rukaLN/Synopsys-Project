@@ -133,6 +133,41 @@ struct BreakRiskModel {
         return Result(score: score, reasons: reasons, needsBreak: needsBreak, contributions: contributions)
     }
 
+    // MARK: - In-app explainer
+
+    /// One row in the break-risk explainer: a metric, its weight in the equation,
+    /// and a plain-language description of how its 0...1 sub-score is computed.
+    struct MetricInfo: Identifiable {
+        let id = UUID()
+        let name: String
+        let weight: Double
+        let rule: String
+    }
+
+    /// Describes every metric in the equation, straight from the live weights and
+    /// reference values, so the in-app explainer always matches the real model.
+    var metricInfo: [MetricInfo] {
+        func pct(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+        return [
+            MetricInfo(name: "Walking speed", weight: weights[.speed] ?? 0,
+                       rule: "Risk climbs as speed falls below \(String(format: "%.1f", safeWalkingSpeed)) m/s."),
+            MetricInfo(name: "Cadence", weight: weights[.cadence] ?? 0,
+                       rule: "Risk climbs as cadence slows below \(String(format: "%.1f", safeCadence)) steps/s."),
+            MetricInfo(name: "Step length", weight: weights[.stepLength] ?? 0,
+                       rule: "Risk climbs as steps shorten below \(String(format: "%.2f", safeStepLength)) m."),
+            MetricInfo(name: "Steadiness", weight: weights[.steadiness] ?? 0,
+                       rule: "Risk climbs as steadiness drops below \(pct(steadinessFloor))."),
+            MetricInfo(name: "Asymmetry", weight: weights[.asymmetry] ?? 0,
+                       rule: "Risk rises from \(pct(normalAsymmetry)) up to \(pct(asymmetryCeiling)) unevenness."),
+            MetricInfo(name: "Double support", weight: weights[.doubleSupport] ?? 0,
+                       rule: "Risk rises from \(pct(normalDoubleSupport)) up to \(pct(doubleSupportCeiling)) of each step on both feet."),
+            MetricInfo(name: "Heart rate", weight: weights[.heartRate] ?? 0,
+                       rule: "Risk rises from \(pct(safeHeartRateFraction)) up to \(pct(heartRateCeiling)) of your max heart rate."),
+            MetricInfo(name: "Duration", weight: weights[.duration] ?? 0,
+                       rule: "Risk rises steadily toward the 30-minute rest reminder."),
+        ]
+    }
+
     // MARK: - Sub-score helpers
 
     /// Risk rises as a value falls below a safe floor (speed, cadence, steadiness).

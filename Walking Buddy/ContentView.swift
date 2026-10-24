@@ -3,6 +3,7 @@ import HealthKit
 
 struct ContentView: View {
     @StateObject private var healthManager = HealthKitManager()
+    @State private var showingRiskInfo = false
 
     var body: some View {
         // The alert sits on the TabView so it appears whichever tab is showing.
@@ -48,6 +49,9 @@ struct ContentView: View {
             .padding(.bottom, 12)
         }
         .background(Theme.background.ignoresSafeArea())
+        .sheet(isPresented: $showingRiskInfo) {
+            BreakRiskInfoView()
+        }
     }
 
     private var notificationsBanner: some View {
@@ -91,6 +95,14 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showingRiskInfo = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Theme.brandTeal)
+            }
+            .accessibilityLabel("How break risk is calculated")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -120,16 +132,17 @@ struct ContentView: View {
     }
 
     private var metricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-            MetricCard(icon: "speedometer", label: "Live Speed", value: healthManager.currentPaceStatus)
-            MetricCard(icon: "metronome.fill", label: "Cadence", value: healthManager.cadenceStatus)
+        let risks = healthManager.metricRisks
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            MetricCard(icon: "speedometer", label: "Live Speed", value: healthManager.currentPaceStatus, risk: risks["speed"])
+            MetricCard(icon: "metronome.fill", label: "Cadence", value: healthManager.cadenceStatus, risk: risks["cadence"])
             MetricCard(icon: "figure.walk", label: "Steps", value: healthManager.stepsStatus)
             MetricCard(icon: "location.fill", label: "Distance", value: healthManager.distanceStatus)
-            MetricCard(icon: "clock.fill", label: "Elapsed Time", value: healthManager.elapsedTimeStatus)
-            MetricCard(icon: "waveform.path.ecg", label: "Steadiness", value: healthManager.steadinessStatus)
-            MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus)
-            MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus)
-            MetricCard(icon: "ruler.fill", label: "Step Length", value: healthManager.stepLengthStatus)
+            MetricCard(icon: "clock.fill", label: "Elapsed Time", value: healthManager.elapsedTimeStatus, risk: risks["duration"])
+            MetricCard(icon: "waveform.path.ecg", label: "Steadiness", value: healthManager.steadinessStatus, risk: risks["steadiness"])
+            MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus, risk: risks["asymmetry"])
+            MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus, risk: risks["doubleSupport"])
+            MetricCard(icon: "ruler.fill", label: "Step Length", value: healthManager.stepLengthStatus, risk: risks["stepLength"])
         }
     }
 
@@ -182,11 +195,7 @@ struct ContentView: View {
     }
 
     private var riskColor: Color {
-        switch riskValue {
-        case ..<40: return Theme.brandGreen
-        case 40..<70: return .orange
-        default: return .red
-        }
+        Theme.riskColor(Double(riskValue) / 100)
     }
 }
 
@@ -205,6 +214,17 @@ enum Theme {
     static let background = Color(.systemGroupedBackground)
     static let card = Color(.secondarySystemGroupedBackground)
     static let shadow = Color.black.opacity(0.06)
+
+    /// Shared green → orange → red scale used by the break-risk ring and every
+    /// metric card, so a "dangerous" reading looks the same everywhere. `fraction`
+    /// is a 0...1 risk sub-score (higher = more dangerous).
+    static func riskColor(_ fraction: Double) -> Color {
+        switch fraction {
+        case ..<0.4: return brandGreen
+        case ..<0.7: return .orange
+        default: return .red
+        }
+    }
 }
 
 // MARK: - Logo
@@ -305,6 +325,14 @@ struct MetricCard: View {
     let icon: String
     let label: String
     let value: String
+    /// 0...1 danger sub-score for this metric. When present, the value is tinted
+    /// green/orange/red like the break-risk ring; `nil` metrics stay neutral.
+    var risk: Double? = nil
+
+    private var valueColor: Color {
+        guard let risk else { return .primary }
+        return Theme.riskColor(risk)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -316,7 +344,7 @@ struct MetricCard: View {
 
             Text(value)
                 .font(.system(.title3, design: .rounded)).bold()
-                .foregroundStyle(.primary)
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
@@ -331,6 +359,117 @@ struct MetricCard: View {
     }
 }
 
+// MARK: - Break-risk explainer
+
+/// Explains how the composite break-risk score is calculated, mirroring the live
+/// ``BreakRiskModel`` (weights, reference values, and threshold).
+struct BreakRiskInfoView: View {
+    @Environment(\.dismiss) private var dismiss
+    private let model = BreakRiskModel()
+
+    private var breakPercent: Int { Int((model.breakThreshold * 100).rounded()) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Walking Buddy blends every available walking signal into one \u{201C}Break Risk\u{201D} score between 0% and 100%. Each signal gets a 0\u{2013}1 sub-score for how far it has drifted from a senior-safe range, then they\u{2019}re combined as a weighted average.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    equationCard
+                    legendCard
+                    metricsCard
+
+                    Text("Metrics that aren\u{2019}t available on your device (for example heart rate on iPhone, or gait metrics on Apple Watch) simply drop out of both sums, so the score stays balanced.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("How Break Risk Works")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var equationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("The equation")
+                .font(.headline)
+            Text("risk = ( \u{03A3} w\u{1D62} \u{00D7} s\u{1D62} ) / ( \u{03A3} w\u{1D62} )")
+                .font(.system(.body, design: .monospaced)).bold()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 10)
+                .background(Theme.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text("w\u{1D62} is each metric\u{2019}s weight (how much it matters) and s\u{1D62} is its 0\u{2013}1 sub-score. A break is recommended once the risk reaches \(breakPercent)%.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var legendCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Reading the colors")
+                .font(.headline)
+            legendRow(Theme.riskColor(0.1), "Below 40% — in a safe range")
+            legendRow(Theme.riskColor(0.5), "40–70% — getting risky")
+            legendRow(Theme.riskColor(0.8), "70% and up — dangerous")
+            Text("The same scale colors the big ring and each metric below.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func legendRow(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(color).frame(width: 12, height: 12)
+            Text(text).font(.subheadline)
+        }
+    }
+
+    private var metricsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("What goes into it")
+                .font(.headline)
+            ForEach(model.metricInfo) { info in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(info.name).font(.subheadline).bold()
+                        Spacer()
+                        Text("weight \(String(format: "%g", info.weight))")
+                            .font(.caption).bold()
+                            .foregroundStyle(Theme.brandTeal)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.brandGreen.opacity(0.14), in: Capsule())
+                    }
+                    Text(info.rule)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
 #Preview {
     ContentView()
+}
+
+#Preview("Break Risk Info") {
+    BreakRiskInfoView()
 }

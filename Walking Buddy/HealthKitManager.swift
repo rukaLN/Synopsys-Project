@@ -41,6 +41,9 @@ final class HealthKitManager: NSObject, ObservableObject {
     @Published var distanceStatus = "0 m"
     @Published var elapsedTimeStatus = "0:00"
     @Published var riskScoreStatus = "0%"
+    /// Per-metric sub-scores (0...1) from the latest ``BreakRiskModel`` evaluation,
+    /// keyed by metric name, so each metric card can color itself like the risk ring.
+    @Published var metricRisks: [String: Double] = [:]
 
     // iPhone gait context (from HealthKit).
     @Published var currentPaceStatus = "Unknown"
@@ -228,6 +231,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestStepCount = 0
         latestDistance = 0
         riskTripStart = nil
+        metricRisks = [:]
     }
 
     /// Stores the finished walk in History. Accidental starts (hardly any walking) are ignored.
@@ -297,6 +301,9 @@ final class HealthKitManager: NSObject, ObservableObject {
         let result = riskModel.evaluate(inputs)
         latestRisk = result.score
         riskScoreStatus = "\(Int((result.score * 100).rounded()))%"
+        var risks: [String: Double] = [:]
+        for contribution in result.contributions { risks[contribution.metric] = contribution.score }
+        metricRisks = risks
         publishWidgetSnapshot()
 
         // Alarm when the risk ring itself stays at/above the break threshold for
