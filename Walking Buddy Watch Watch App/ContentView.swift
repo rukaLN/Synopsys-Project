@@ -68,19 +68,27 @@ struct ContentView: View {
                         Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
                     }
                     .tint(.red)
+                } else if healthManager.isTracking {
+                    // Mirrors the iPhone: Pause beside Stop while a walk is running.
+                    Button {
+                        healthManager.pauseSession()
+                    } label: {
+                        Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity)
+                    }
+                    .tint(Self.brandTeal)
+                    Button {
+                        healthManager.stopSession()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                    }
+                    .tint(.red)
                 } else {
                     Button {
-                        if healthManager.isTracking {
-                            healthManager.stopSession()
-                        } else {
-                            healthManager.requestAuthorizationAndStart()
-                        }
+                        healthManager.requestAuthorizationAndStart()
                     } label: {
-                        Label(healthManager.isTracking ? "Stop" : "Start Walk",
-                              systemImage: healthManager.isTracking ? "stop.fill" : "figure.walk")
-                            .frame(maxWidth: .infinity)
+                        Label("Start Walk", systemImage: "figure.walk").frame(maxWidth: .infinity)
                     }
-                    .tint(healthManager.isTracking ? .red : Self.brandTeal)
+                    .tint(Self.brandTeal)
                 }
             }
             .padding(.horizontal, 4)
