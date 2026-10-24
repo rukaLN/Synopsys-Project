@@ -13,6 +13,7 @@
 
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 // MARK: - Shared data
 
@@ -167,10 +168,67 @@ struct WalkingBuddyWatchWidget: Widget {
     }
 }
 
+// MARK: - RelevanceKit Smart Stack widget (watchOS 12+)
+
+/// Empty configuration intent required by `RelevanceEntriesProvider`.
+@available(watchOS 12.0, *)
+struct WalkRelevanceIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Walking Buddy"
+}
+
+/// Relevance entry wrapping the shared App Group snapshot.
+@available(watchOS 12.0, *)
+struct WalkRelevanceEntry: RelevanceEntry {
+    let date: Date
+    let walk: WatchEntry
+}
+
+/// Tells the watchOS Smart Stack that Walking Buddy is relevant while a workout
+/// is active — a contextual clue instead of the timeline score. The fitness
+/// clue only fires if this widget extension has HealthKit permission.
+@available(watchOS 12.0, *)
+struct WalkRelevanceProvider: RelevanceEntriesProvider {
+    func placeholder(context: Context) -> WalkRelevanceEntry {
+        WalkRelevanceEntry(date: .now, walk: .placeholder)
+    }
+
+    func entry(configuration: WalkRelevanceIntent, context: Context) async throws -> WalkRelevanceEntry {
+        WalkRelevanceEntry(date: .now, walk: WatchWidgetData.load())
+    }
+
+    func relevance() async -> WidgetRelevance<WalkRelevanceIntent> {
+        let attribute = WidgetRelevanceAttribute<WalkRelevanceIntent>(
+            configuration: WalkRelevanceIntent(),
+            context: .fitness(.workoutActive)
+        )
+        return WidgetRelevance([attribute])
+    }
+}
+
+@available(watchOS 12.0, *)
+struct WalkingBuddySmartStackWidget: Widget {
+    let kind = "WalkingBuddySmartStackWidget"
+
+    var body: some WidgetConfiguration {
+        RelevanceConfiguration(kind: kind, provider: WalkRelevanceProvider()) { entry in
+            WatchWidgetEntryView(entry: entry.walk)
+        }
+        .configurationDisplayName("Walking Buddy")
+        .description("Appears in the Smart Stack while you're on a walk.")
+        .supportedFamilies([.accessoryRectangular, .accessoryCircular])
+        // Lets this relevance widget stand in for the pinned timeline widget so
+        // the Smart Stack doesn't show two Walking Buddy entries.
+        .associatedKind("WalkingBuddyWatchWidget")
+    }
+}
+
 @main
 struct WalkingBuddyWatchWidgetBundle: WidgetBundle {
     var body: some Widget {
         WalkingBuddyWatchWidget()
+        if #available(watchOS 12.0, *) {
+            WalkingBuddySmartStackWidget()
+        }
     }
 }
 
