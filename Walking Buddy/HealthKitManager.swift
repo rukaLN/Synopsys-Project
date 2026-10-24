@@ -898,6 +898,7 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
         let read: Set<HKObjectType> = {
             var types = Set(share.map { $0 as HKObjectType })
             if let steps = HKQuantityType.quantityType(forIdentifier: .stepCount) { types.insert(steps) }
+            if let flights = HKQuantityType.quantityType(forIdentifier: .flightsClimbed) { types.insert(flights) }
             types.insert(HKObjectType.characteristicType(forIdentifier: .dateOfBirth)!)
             return types
         }()
@@ -926,7 +927,13 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
         do {
             let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
             let builder = session.associatedWorkoutBuilder()
-            builder.dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
+            let dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
+            // Flights aren't collected for a walking workout by default; opt in so
+            // the Watch counts stair exertion like the iPhone's pedometer does.
+            if let flights = HKQuantityType.quantityType(forIdentifier: .flightsClimbed) {
+                dataSource.enableCollection(for: flights, predicate: nil)
+            }
+            builder.dataSource = dataSource
             session.delegate = self
             builder.delegate = self
 
@@ -982,6 +989,11 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
                 stepsStatus = "\(latestStepCount)"
                 let minutes = currentElapsed / 60
                 if minutes > 0 { latestCadence = steps / currentElapsed }
+            }
+        case HKQuantityType.quantityType(forIdentifier: .flightsClimbed):
+            if let flights = statistics.sumQuantity()?.doubleValue(for: .count()) {
+                latestFlights = flights
+                flightsStatus = "\(Int(flights))"
             }
         default:
             break

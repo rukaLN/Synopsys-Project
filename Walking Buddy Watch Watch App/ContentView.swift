@@ -49,6 +49,7 @@ struct ContentView: View {
                     metricRow("Heart Rate", healthManager.heartRateStatus, risk: healthManager.metricRisks["heartRate"])
                     metricRow("Steps", healthManager.stepsStatus)
                     metricRow("Distance", healthManager.distanceStatus)
+                    metricRow("Flights", healthManager.flightsStatus, risk: healthManager.metricRisks["flights"])
                     metricRow("Energy", healthManager.activeEnergyStatus)
                     metricRow("Time", healthManager.elapsedTimeStatus, risk: healthManager.metricRisks["duration"])
                 }
