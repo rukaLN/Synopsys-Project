@@ -17,6 +17,7 @@ struct ContentView: View {
         .onAppear {
             HapticsManager.prepare()
             healthManager.refreshNotificationStatus()
+            healthManager.clearOrphanedLiveActivitiesIfIdle()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             healthManager.refreshNotificationStatus()
@@ -133,16 +134,23 @@ struct ContentView: View {
 
     private var metricsGrid: some View {
         let risks = healthManager.metricRisks
-        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-            MetricCard(icon: "speedometer", label: "Live Speed", value: healthManager.currentPaceStatus, risk: risks["speed"])
-            MetricCard(icon: "metronome.fill", label: "Cadence", value: healthManager.cadenceStatus, risk: risks["cadence"])
-            MetricCard(icon: "figure.walk", label: "Steps", value: healthManager.stepsStatus)
-            MetricCard(icon: "location.fill", label: "Distance", value: healthManager.distanceStatus)
-            MetricCard(icon: "clock.fill", label: "Elapsed Time", value: healthManager.elapsedTimeStatus, risk: risks["duration"])
-            MetricCard(icon: "waveform.path.ecg", label: "Steadiness", value: healthManager.steadinessStatus, risk: risks["steadiness"])
-            MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus, risk: risks["asymmetry"])
-            MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus, risk: risks["doubleSupport"])
-            MetricCard(icon: "ruler.fill", label: "Step Length", value: healthManager.stepLengthStatus, risk: risks["stepLength"])
+        return VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                MetricCard(icon: "speedometer", label: "Live Speed", value: healthManager.currentPaceStatus, risk: risks["speed"])
+                MetricCard(icon: "metronome.fill", label: "Cadence", value: healthManager.cadenceStatus, risk: risks["cadence"])
+                MetricCard(icon: "figure.walk", label: "Steps", value: healthManager.stepsStatus)
+                MetricCard(icon: "location.fill", label: "Distance", value: healthManager.distanceStatus)
+                MetricCard(icon: "figure.stairs", label: "Flights", value: healthManager.flightsStatus, risk: risks["flights"])
+                MetricCard(icon: "clock.fill", label: "Elapsed Time", value: healthManager.elapsedTimeStatus, risk: risks["duration"])
+                MetricCard(icon: "waveform.path.ecg", label: "Steadiness", value: healthManager.steadinessStatus, risk: risks["steadiness"])
+                MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus, risk: risks["asymmetry"])
+                MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus, risk: risks["doubleSupport"])
+                MetricCard(icon: "ruler.fill", label: "Step Length", value: healthManager.stepLengthStatus, risk: risks["stepLength"])
+            }
+            Text("Steadiness, asymmetry, double support and step length are live estimates from your phone\u{2019}s motion sensors, not clinical Apple Health readings.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -159,8 +167,13 @@ struct ContentView: View {
                 }
             }
         } else if healthManager.isTracking {
-            pillButton("Stop Monitoring", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
-                healthManager.stopSession()
+            HStack(spacing: 12) {
+                pillButton("Pause", icon: "pause.fill", gradient: Theme.brandGradient, glow: Theme.brandTeal) {
+                    healthManager.pauseSession()
+                }
+                pillButton("Stop", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
+                    healthManager.stopSession()
+                }
             }
         } else {
             pillButton("Start Live Track", icon: "figure.walk", gradient: Theme.brandGradient, glow: Theme.brandTeal) {

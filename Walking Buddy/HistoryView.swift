@@ -59,7 +59,7 @@ struct HistoryView: View {
                 .foregroundStyle(Theme.brandTeal)
             Text("No walks yet")
                 .font(.system(.title3, design: .rounded)).bold()
-            Text("Finish a walk on the Monitor tab and it is saved here, so you can see how your walking changes over time.")
+            Text("Finish a walk of at least 5 minutes on the Monitor tab and it is saved here, so you can see how your walking changes over time.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)

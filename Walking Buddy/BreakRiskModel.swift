@@ -27,6 +27,8 @@ struct BreakRiskModel {
     var doubleSupportCeiling = 0.45   // 45%   — too long balancing on both feet
     var safeHeartRateFraction = 0.70  // fraction of max HR considered the ceiling
     var heartRateCeiling = 0.90
+    var exertionFlights = 2.0         // flights of stairs before exertion starts counting
+    var flightsCeiling = 8.0          // flights at which stair exertion is fully "risky"
 
     /// Composite score at or above which we recommend a break.
     var breakThreshold = 0.45
@@ -42,7 +44,7 @@ struct BreakRiskModel {
     // MARK: - Weights (relative importance of each signal)
 
     private enum Metric: String, CaseIterable {
-        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration
+        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration, flights
     }
 
     private let weights: [Metric: Double] = [
@@ -54,6 +56,7 @@ struct BreakRiskModel {
         .doubleSupport: 1.2,
         .heartRate: 1.3,
         .duration: 1.0,
+        .flights: 0.8,
     ]
 
     // MARK: - Inputs / Result
@@ -67,6 +70,7 @@ struct BreakRiskModel {
         var doubleSupport: Double?       // 0...1 (fraction)
         var heartRateFraction: Double?   // 0...1 of max HR
         var durationFraction: Double?    // elapsed / maximum walk duration
+        var flightsClimbed: Double?      // stairs climbed so far this walk
         var stepCount: Int = 0
     }
 
@@ -127,6 +131,9 @@ struct BreakRiskModel {
         contribute(.duration,
                    input.durationFraction,
                    reason: "you have been walking for a while")
+        contribute(.flights,
+                   input.flightsClimbed.map { excess(value: $0, normal: exertionFlights, ceiling: flightsCeiling) },
+                   reason: "you have climbed several flights of stairs")
 
         let score = totalWeight > 0 ? weightedSum / totalWeight : 0
         let needsBreak = input.stepCount >= minimumStepsBeforeAlert && score >= breakThreshold
@@ -165,6 +172,8 @@ struct BreakRiskModel {
                        rule: "Risk rises from \(pct(safeHeartRateFraction)) up to \(pct(heartRateCeiling)) of your max heart rate."),
             MetricInfo(name: "Duration", weight: weights[.duration] ?? 0,
                        rule: "Risk rises steadily toward the 30-minute rest reminder."),
+            MetricInfo(name: "Stairs climbed", weight: weights[.flights] ?? 0,
+                       rule: "Risk rises from \(Int(exertionFlights)) up to \(Int(flightsCeiling)) flights of stairs."),
         ]
     }
 

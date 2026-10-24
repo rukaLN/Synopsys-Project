@@ -39,6 +39,7 @@ final class HealthKitManager: NSObject, ObservableObject {
 
     @Published var stepsStatus = "0"
     @Published var distanceStatus = "0 m"
+    @Published var flightsStatus = "0"
     @Published var elapsedTimeStatus = "0:00"
     @Published var riskScoreStatus = "0%"
     /// Per-metric sub-scores (0...1) from the latest ``BreakRiskModel`` evaluation,
@@ -74,6 +75,9 @@ final class HealthKitManager: NSObject, ObservableObject {
     private let idleThreshold: TimeInterval = 15
     /// Seniors are advised to rest after a continuous walk of this length.
     private let maximumWalkDuration: TimeInterval = 30 * 60
+    /// A finished walk must last at least this long to be saved to History — short
+    /// accidental walks don't make a meaningful trend. Drives the History/trends.
+    private let minimumWalkDurationForHistory: TimeInterval = 5 * 60
 
     /// Hold time H: the risk ring must stay at/above the break threshold this long
     /// continuously to alarm.
@@ -95,9 +99,18 @@ final class HealthKitManager: NSObject, ObservableObject {
     private var latestRisk = 0.0
     private var latestStepCount = 0 { didSet { if latestStepCount > oldValue { lastMovementDate = Date() } } }
     private var latestDistance = 0.0 { didSet { if latestDistance > oldValue { lastMovementDate = Date() } } }
+    private var latestFlights = 0.0
     private var lastMovementDate = Date()
     private var lastAlertDate: Date?
     private var recorder = WalkRecorder()
+
+    // Within-walk fatigue detection: watch pace/cadence/steadiness drift worse
+    // than earlier in the SAME walk (the person tiring), not just a single low
+    // reading, and nudge a rest.
+    private struct GaitSample { let t: TimeInterval; let speed: Double?; let cadence: Double?; let steadiness: Double? }
+    private var gaitHistory: [GaitSample] = []
+    private var lastFatigueAlert: Date?
+    private let fatigueMinWalk: TimeInterval = 3 * 60
 
     private var isWalking: Bool { Date().timeIntervalSince(lastMovementDate) < idleThreshold }
 
@@ -152,6 +165,17 @@ final class HealthKitManager: NSObject, ObservableObject {
         }
     }
 
+    /// Call at launch. If we're not actively tracking, clear any Live Activity a
+    /// previous session left running after the app was swiped away — otherwise it
+    /// lingers as a "ghost" card and the next walk stacks a second one.
+    func clearOrphanedLiveActivitiesIfIdle() {
+        #if os(iOS)
+        if #available(iOS 16.2, *), !isTracking {
+            endAllLiveActivities()
+        }
+        #endif
+    }
+
     func stopSession() {
         let saved = saveWalk()
         isTracking = false
@@ -168,7 +192,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         publishWidgetSnapshot()
 
         #if os(iOS)
-        if #available(iOS 16.2, *) { endLiveActivity() }
+        if #available(iOS 16.2, *) { endAllLiveActivities() }
         #endif
     }
 
@@ -206,8 +230,11 @@ final class HealthKitManager: NSObject, ObservableObject {
         segmentStartDate = Date()
         stepsStatus = "0"
         distanceStatus = "0 m"
+        flightsStatus = "0"
         elapsedTimeStatus = "0:00"
         riskScoreStatus = "0%"
+        gaitHistory.removeAll()
+        lastFatigueAlert = nil
         monitoringMessage = "Reading live walking data from the sensors."
 
         startClock()
@@ -230,13 +257,17 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestRisk = 0
         latestStepCount = 0
         latestDistance = 0
+        latestFlights = 0
         riskTripStart = nil
         metricRisks = [:]
+        gaitHistory.removeAll()
+        lastFatigueAlert = nil
     }
 
-    /// Stores the finished walk in History. Accidental starts (hardly any walking) are ignored.
+    /// Stores the finished walk in History. Accidental starts (hardly any walking)
+    /// and walks shorter than ``minimumWalkDurationForHistory`` are ignored.
     private func saveWalk() -> Bool {
-        guard isTracking, hasWalkedEnough else { return false }
+        guard isTracking, hasWalkedEnough, currentElapsed >= minimumWalkDurationForHistory else { return false }
         WalkHistory.shared.add(recorder.finish(duration: currentElapsed, steps: latestStepCount, distance: latestDistance))
         return true
     }
@@ -262,7 +293,43 @@ final class HealthKitManager: NSObject, ObservableObject {
         elapsedTimeStatus = Self.durationFormatter.string(from: currentElapsed) ?? "0:00"
         checkWalkDuration()
         updateBreakRisk()
+        checkFatigueTrend()
         sampleWalk()
+    }
+
+    /// Fatigue = a downward *trend* within the walk, not a single low reading.
+    /// If pace, cadence and steadiness have each drifted meaningfully worse than
+    /// earlier in the same walk, nudge a rest (paced like the other alerts).
+    private func checkFatigueTrend() {
+        guard isWalking, currentElapsed >= fatigueMinWalk else { return }
+
+        gaitHistory.append(GaitSample(t: currentElapsed, speed: latestWalkingSpeed,
+                                      cadence: latestCadence, steadiness: latestWalkingSteadiness))
+        gaitHistory.removeAll { $0.t < currentElapsed - 360 }   // keep ~6 min
+
+        let earliest = gaitHistory.first?.t ?? currentElapsed
+        guard currentElapsed - earliest >= 120 else { return }  // need ~2 min of spread
+
+        let baseline = gaitHistory.filter { $0.t <= earliest + 60 }
+        let recent = gaitHistory.filter { $0.t >= currentElapsed - 60 }
+        guard baseline.count >= 3, recent.count >= 3 else { return }
+
+        func avg(_ key: (GaitSample) -> Double?, _ xs: [GaitSample]) -> Double? {
+            let vals = xs.compactMap(key)
+            return vals.isEmpty ? nil : vals.reduce(0, +) / Double(vals.count)
+        }
+
+        // Lower pace / cadence / steadiness than early in the walk = worsening.
+        var worsened = 0
+        if let b = avg(\.speed, baseline), let r = avg(\.speed, recent), b > 0, r < b * 0.85 { worsened += 1 }
+        if let b = avg(\.cadence, baseline), let r = avg(\.cadence, recent), b > 0, r < b * 0.85 { worsened += 1 }
+        if let b = avg(\.steadiness, baseline), let r = avg(\.steadiness, recent), b > 0, r < b * 0.85 { worsened += 1 }
+
+        guard worsened >= 2 else { return }
+        if let last = lastFatigueAlert, Date().timeIntervalSince(last) < alertRepeatInterval { return }
+        lastFatigueAlert = Date()
+        let stairs = latestFlights >= 2 ? " after climbing stairs" : ""
+        presentBreakAlert(message: "Your walking is slowing and becoming less steady\(stairs) — this can be a sign of fatigue. Please find a safe place to sit and rest.")
     }
 
     /// Warns again after every further `maximumWalkDuration` of walking, not just the first.
@@ -295,6 +362,7 @@ final class HealthKitManager: NSObject, ObservableObject {
             doubleSupport: latestDoubleSupport,
             heartRateFraction: latestHeartRateFraction,
             durationFraction: currentElapsed / maximumWalkDuration,
+            flightsClimbed: latestFlights,
             stepCount: latestStepCount
         )
 
@@ -622,6 +690,11 @@ extension HealthKitManager {
             distanceStatus = Self.metersString(distance)
         }
 
+        if let floors = data.floorsAscended?.doubleValue {
+            latestFlights = floors
+            flightsStatus = "\(Int(floors))"
+        }
+
         if let pace = data.currentPace?.doubleValue, pace > 0 {
             let metersPerSecond = 1 / pace
             latestWalkingSpeed = metersPerSecond
@@ -698,6 +771,8 @@ extension HealthKitManager {
             self.latestCadence = cadence
             self.latestStepCount = Int(steps)
             self.latestDistance = distance
+            self.latestFlights = Double(elapsedSeconds / 20)
+            self.flightsStatus = "\(Int(self.latestFlights))"
             self.latestWalkingSteadiness = tired ? 0.25 : 0.75
             self.latestAsymmetry = tired ? 0.14 : 0.04
             self.latestDoubleSupport = tired ? 0.40 : 0.28
@@ -758,8 +833,10 @@ extension HealthKitManager {
     }
 
     func startLiveActivity() {
-        guard liveActivity == nil,
-              ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        // Clear any leftover activities (e.g. orphaned when the app was swiped
+        // away mid-walk) so a new walk never stacks a second Live Activity.
+        endAllLiveActivities()
         do {
             liveActivity = try Activity.request(
                 attributes: WalkActivityAttributes(),
@@ -767,6 +844,15 @@ extension HealthKitManager {
             )
         } catch {
             liveActivity = nil
+        }
+    }
+
+    /// Ends every Walking Buddy Live Activity the system still has — including any
+    /// orphaned by a previous termination — and drops our reference.
+    func endAllLiveActivities() {
+        liveActivity = nil
+        for activity in Activity<WalkActivityAttributes>.activities {
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
     }
 

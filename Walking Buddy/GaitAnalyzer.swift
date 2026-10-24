@@ -109,32 +109,37 @@ final class GaitAnalyzer {
     private func emit() {
         var m = Metrics()
 
-        if intervals.count >= 2 {
-            let meanInterval = intervals.reduce(0, +) / Double(intervals.count)
-            if meanInterval > 0 { m.cadence = 1.0 / meanInterval }
+        let meanInterval = intervals.isEmpty ? 0 : intervals.reduce(0, +) / Double(intervals.count)
+        if intervals.count >= 2, meanInterval > 0 { m.cadence = 1.0 / meanInterval }
 
-            if intervals.count >= 4 {
-                // Steadiness: lower step-time variability = steadier gait.
-                let variance = intervals.reduce(0) { $0 + ($1 - meanInterval) * ($1 - meanInterval) } / Double(intervals.count)
-                let cv = meanInterval > 0 ? variance.squareRoot() / meanInterval : 0
-                m.steadiness = clamp(1 - (cv - 0.03) / 0.12)
+        // Only report the gait *quality* metrics (steadiness / asymmetry /
+        // double-support) once we have a clear, sustained walking rhythm: enough
+        // recent steps whose average interval looks like real walking (~0.67–3
+        // steps/s). This stops a few noisy steps or pocket jostling from
+        // producing a bogus 0% that would also spike the break-risk score.
+        let hasRhythm = intervals.count >= 6 && meanInterval >= 0.33 && meanInterval <= 1.5
 
-                // Asymmetry: alternate step intervals correspond to left vs
-                // right legs; a steady gait keeps them nearly equal.
-                let odd = stride(from: 0, to: intervals.count, by: 2).map { intervals[$0] }
-                let even = stride(from: 1, to: intervals.count, by: 2).map { intervals[$0] }
-                if let l = mean(odd), let r = mean(even), (l + r) > 0 {
-                    m.asymmetry = clamp(abs(l - r) / ((l + r) / 2), upper: 1)
-                }
+        if hasRhythm {
+            // Steadiness: lower step-time variability = steadier gait.
+            let variance = intervals.reduce(0) { $0 + ($1 - meanInterval) * ($1 - meanInterval) } / Double(intervals.count)
+            let cv = variance.squareRoot() / meanInterval
+            m.steadiness = clamp(1 - (cv - 0.03) / 0.12)
+
+            // Asymmetry: alternate step intervals correspond to left vs right
+            // legs; a steady gait keeps them nearly equal.
+            let odd = stride(from: 0, to: intervals.count, by: 2).map { intervals[$0] }
+            let even = stride(from: 1, to: intervals.count, by: 2).map { intervals[$0] }
+            if let l = mean(odd), let r = mean(even), (l + r) > 0 {
+                m.asymmetry = clamp(abs(l - r) / ((l + r) / 2), upper: 1)
             }
-        }
 
-        // Double-support proxy: fraction of recent samples near zero vertical
-        // acceleration (both feet planted / stance phase).
-        if verticalBuffer.count >= 50 {
-            let quiet = verticalBuffer.filter { abs($0) < 0.03 }.count
-            let fraction = Double(quiet) / Double(verticalBuffer.count)
-            m.doubleSupport = min(max(fraction, 0.1), 0.6)
+            // Double-support proxy: fraction of recent samples near zero vertical
+            // acceleration (both feet planted / stance phase). Only while walking.
+            if verticalBuffer.count >= 50 {
+                let quiet = verticalBuffer.filter { abs($0) < 0.03 }.count
+                let fraction = Double(quiet) / Double(verticalBuffer.count)
+                m.doubleSupport = min(max(fraction, 0.1), 0.6)
+            }
         }
 
         let metrics = m
