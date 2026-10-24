@@ -36,6 +36,10 @@ work in the Simulator — verify on hardware:
 - [x] Source: `Walking Buddy Widget/WalkingBuddyWatchWidget.swift` (circular / corner / inline + rectangular Smart Stack)
 - [x] App Group capability
 - [x] watchOS Deployment Target 10.0
+- [x] RelevanceKit Smart Stack widget (`WalkingBuddySmartStackWidget`, watchOS 12+) — surfaces via a `.fitness(.workoutActive)` clue
+- [x] HealthKit entitlement (`com.apple.developer.healthkit`) on the widget extension — **required** for the fitness relevance clue to fire
+- [x] `NSHealthShareUsageDescription` added to `Walking Buddy Widget/Info.plist`
+- [ ] **Verify in Xcode:** Signing & Capabilities for the `Walking Buddy WidgetExtension` target shows **HealthKit** (so automatic signing adds it to the provisioning profile). The entitlement is already in `Walking Buddy WidgetExtension.entitlements`.
 
 **iPhone Lock + Home Screen widget** (`Walking Buddy iOS WidgetExtension`, iOS)
 - [x] Target created (embedded in iPhone app)
