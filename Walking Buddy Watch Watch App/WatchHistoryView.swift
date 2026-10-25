@@ -47,6 +47,13 @@ struct WatchHistoryView: View {
             case .heartRate: "\(Int(value.rounded())) bpm"
             }
         }
+
+        /// The next metric, wrapping around — used by the tap-to-cycle selector.
+        var next: WatchMetric {
+            let all = WatchMetric.allCases
+            let index = all.firstIndex(of: self) ?? 0
+            return all[(index + 1) % all.count]
+        }
     }
 
     private struct Point: Identifiable {
@@ -76,12 +83,23 @@ struct WatchHistoryView: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
-                    // Always show the metric picker, so you can switch metrics even when
-                    // the selected one doesn't yet have enough data to chart.
-                    Picker("Metric", selection: $metric) {
-                        ForEach(WatchMetric.allCases) { Text($0.title).tag($0) }
+                    // Tap to cycle metrics. A Picker here would bind the Digital Crown
+                    // to its options and stop the page from scrolling, so we use a simple
+                    // button instead and leave the crown free to scroll the view.
+                    Button {
+                        metric = metric.next
+                    } label: {
+                        HStack {
+                            Text(metric.title)
+                                .font(.caption).bold()
+                            Spacer()
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Self.brandTeal)
                     }
-                    .labelsHidden()
+                    .buttonStyle(.bordered)
+                    .tint(Self.brandGreen.opacity(0.35))
 
                     if points.count < 2 {
                         Text("Not enough \(metric.title.lowercased()) data yet. Try another metric or finish more walks.")

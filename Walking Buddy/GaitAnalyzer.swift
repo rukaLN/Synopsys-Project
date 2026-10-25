@@ -47,11 +47,12 @@ final class GaitAnalyzer {
     private var verticalBuffer: [Double] = []
     private let bufferLimit = 150               // ~3 s at 50 Hz
 
-    // Threshold-crossing step detector state (values are in g).
+    // Threshold-crossing step detector state (values are in g). Kept deliberately
+    // sensitive so lighter / less regular steps still register on wrist and in-pocket.
     private var aboveThreshold = false
-    private let stepHigh = 0.10
-    private let stepLow = 0.04
-    private let refractory = 0.25               // min seconds between steps
+    private let stepHigh = 0.07
+    private let stepLow = 0.03
+    private let refractory = 0.22               // min seconds between steps
 
     func start() {
         guard motion.isDeviceMotionAvailable else { return }
@@ -115,18 +116,18 @@ final class GaitAnalyzer {
         let meanInterval = intervals.isEmpty ? 0 : intervals.reduce(0, +) / Double(intervals.count)
         if intervals.count >= 2, meanInterval > 0 { m.cadence = 1.0 / meanInterval }
 
-        // Only report the gait *quality* metrics (steadiness / asymmetry /
-        // double-support) once we have a clear, sustained walking rhythm: enough
-        // recent steps whose average interval looks like real walking (~0.67–3
-        // steps/s). This stops a few noisy steps or pocket jostling from
-        // producing a bogus 0% that would also spike the break-risk score.
-        let hasRhythm = intervals.count >= 6 && meanInterval >= 0.33 && meanInterval <= 1.5
+        // Report the gait *quality* metrics (steadiness / asymmetry / double-support)
+        // once we have a few recent steps in a plausible walking range (~0.5–4 steps/s).
+        // The window is wide on purpose so irregular ("crazy") walking still registers
+        // instead of silently dropping out.
+        let hasRhythm = intervals.count >= 4 && meanInterval >= 0.25 && meanInterval <= 2.0
 
         if hasRhythm {
-            // Steadiness: lower step-time variability = steadier gait.
+            // Steadiness: lower step-time variability = steadier gait. Mapped tighter
+            // so normal-to-unsteady gait spans more of the 0...1 range (more diverse).
             let variance = intervals.reduce(0) { $0 + ($1 - meanInterval) * ($1 - meanInterval) } / Double(intervals.count)
             let cv = variance.squareRoot() / meanInterval
-            m.steadiness = clamp(1 - (cv - 0.03) / 0.12)
+            m.steadiness = clamp(1 - (cv - 0.02) / 0.10)
             m.stepTimeVariability = cv
 
             // Asymmetry: alternate step intervals correspond to left vs right

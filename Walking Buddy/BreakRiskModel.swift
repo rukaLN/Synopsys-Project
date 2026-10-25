@@ -17,14 +17,14 @@ struct BreakRiskModel {
 
     // Sources: Apple HealthKit mobility documentation and common clinical gait
     // norms for older adults. These are intentionally conservative.
-    var safeWalkingSpeed = 0.8        // m/s   — below this is slow / unsafe
-    var safeCadence = 1.2             // steps/s
-    var safeStepLength = 0.55         // m     — steps shorten ("shuffle") with fatigue
-    var steadinessFloor = 0.6         // 0...1 — below this the gait is unsteady
-    var normalAsymmetry = 0.05        // 5%    — above this steps are uneven
-    var asymmetryCeiling = 0.20       // 20%   — fully "risky"
-    var normalDoubleSupport = 0.30    // 30%   — typical is 20–40%
-    var doubleSupportCeiling = 0.45   // 45%   — too long balancing on both feet
+    var safeWalkingSpeed = 0.9        // m/s   — below this is slow / unsafe
+    var safeCadence = 1.3             // steps/s
+    var safeStepLength = 0.60         // m     — steps shorten ("shuffle") with fatigue
+    var steadinessFloor = 0.7         // 0...1 — below this the gait is unsteady
+    var normalAsymmetry = 0.04        // 4%    — above this steps are uneven
+    var asymmetryCeiling = 0.15       // 15%   — fully "risky"
+    var normalDoubleSupport = 0.28    // 28%   — typical is 20–40%
+    var doubleSupportCeiling = 0.40   // 40%   — too long balancing on both feet
     var safeHeartRateFraction = 0.70  // fraction of max HR considered the ceiling
     var heartRateCeiling = 0.90
     var exertionFlights = 2.0         // flights of stairs before exertion starts counting
@@ -33,11 +33,11 @@ struct BreakRiskModel {
     var energyCeiling = 450.0         // kcal at which exertion is fully "risky"
 
     /// Composite score at or above which we recommend a break.
-    var breakThreshold = 0.45
+    var breakThreshold = 0.40
 
     /// Per-metric trip threshold τ: a single metric's sub-score at or above this
     /// is considered "tripped" and starts its sustained-dwell timer.
-    var tripThreshold = 0.5
+    var tripThreshold = 0.45
 
     /// Require a little walking before alerting, to avoid false positives at the
     /// very start of a session.
