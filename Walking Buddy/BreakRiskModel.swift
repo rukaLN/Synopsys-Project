@@ -29,6 +29,8 @@ struct BreakRiskModel {
     var heartRateCeiling = 0.90
     var exertionFlights = 2.0         // flights of stairs before exertion starts counting
     var flightsCeiling = 8.0          // flights at which stair exertion is fully "risky"
+    var exertionEnergy = 150.0        // kcal of active energy before exertion starts counting
+    var energyCeiling = 450.0         // kcal at which exertion is fully "risky"
 
     /// Composite score at or above which we recommend a break.
     var breakThreshold = 0.45
@@ -44,7 +46,7 @@ struct BreakRiskModel {
     // MARK: - Weights (relative importance of each signal)
 
     private enum Metric: String, CaseIterable {
-        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration, flights
+        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration, flights, activeEnergy
     }
 
     private let weights: [Metric: Double] = [
@@ -57,6 +59,7 @@ struct BreakRiskModel {
         .heartRate: 1.3,
         .duration: 1.0,
         .flights: 0.8,
+        .activeEnergy: 0.8,
     ]
 
     // MARK: - Inputs / Result
@@ -71,6 +74,7 @@ struct BreakRiskModel {
         var heartRateFraction: Double?   // 0...1 of max HR
         var durationFraction: Double?    // elapsed / maximum walk duration
         var flightsClimbed: Double?      // stairs climbed so far this walk
+        var activeEnergy: Double?        // kcal of active energy burned so far this walk
         var stepCount: Int = 0
     }
 
@@ -134,6 +138,9 @@ struct BreakRiskModel {
         contribute(.flights,
                    input.flightsClimbed.map { excess(value: $0, normal: exertionFlights, ceiling: flightsCeiling) },
                    reason: "you have climbed several flights of stairs")
+        contribute(.activeEnergy,
+                   input.activeEnergy.map { excess(value: $0, normal: exertionEnergy, ceiling: energyCeiling) },
+                   reason: "you have burned a lot of energy")
 
         let score = totalWeight > 0 ? weightedSum / totalWeight : 0
         let needsBreak = input.stepCount >= minimumStepsBeforeAlert && score >= breakThreshold
@@ -174,6 +181,8 @@ struct BreakRiskModel {
                        rule: "Risk rises steadily toward the 30-minute rest reminder."),
             MetricInfo(name: "Stairs climbed", weight: weights[.flights] ?? 0,
                        rule: "Risk rises from \(Int(exertionFlights)) up to \(Int(flightsCeiling)) flights of stairs."),
+            MetricInfo(name: "Active energy", weight: weights[.activeEnergy] ?? 0,
+                       rule: "Risk rises from \(Int(exertionEnergy)) up to \(Int(energyCeiling)) kcal burned this walk."),
         ]
     }
 

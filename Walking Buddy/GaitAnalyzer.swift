@@ -9,11 +9,12 @@
 //  derives live proxies from vertical acceleration so the values actually move
 //  and respond within a second or two of the user's gait changing.
 //
-//  iOS-only (uses CoreMotion device motion). The file is excluded from the
-//  watchOS target, which gets its signal from HKWorkoutSession instead.
+//  Runs on iPhone (phone near the waist/pocket) and Apple Watch (on the wrist).
+//  The wrist signal is noisier — arm swing dominates — so the quality metrics are
+//  rougher there; the rhythm gate keeps it from reporting bogus values.
 //
 
-#if os(iOS)
+#if os(iOS) || os(watchOS)
 import CoreMotion
 import Foundation
 
@@ -21,7 +22,9 @@ final class GaitAnalyzer {
 
     struct Metrics {
         var cadence: Double?        // steps/s
-        var steadiness: Double?     // 0...1 (1 = very steady)
+        var steadiness: Double?     // 0...1 (1 = very steady), from the generic mapping
+        var stepTimeVariability: Double?  // raw coefficient of variation of step intervals
+                                          // (lower = steadier). Drives personal calibration.
         var asymmetry: Double?      // 0...1 fraction (left/right step-time imbalance)
         var doubleSupport: Double?  // 0...1 fraction (both-feet-down time)
     }
@@ -124,6 +127,7 @@ final class GaitAnalyzer {
             let variance = intervals.reduce(0) { $0 + ($1 - meanInterval) * ($1 - meanInterval) } / Double(intervals.count)
             let cv = variance.squareRoot() / meanInterval
             m.steadiness = clamp(1 - (cv - 0.03) / 0.12)
+            m.stepTimeVariability = cv
 
             // Asymmetry: alternate step intervals correspond to left vs right
             // legs; a steady gait keeps them nearly equal.

@@ -58,11 +58,74 @@ final class HealthKitManager: NSObject, ObservableObject {
     @Published var heartRateStatus = "–"
     @Published var activeEnergyStatus = "–"
 
+    // MARK: - Cross-device sync state
+
+    /// The Apple Watch connection state as seen from the iPhone.
+    enum WatchAvailability {
+        case connected        // paired + our watch app installed → ready to sync
+        case appNotInstalled  // watch paired, but Walking Buddy isn't on it yet
+        case noWatch          // no Apple Watch paired to this iPhone
+    }
+    @Published var watchAvailability: WatchAvailability = .noWatch
+
+    /// iPhone-side: true when a paired Apple Watch has the app installed, so we can
+    /// offer to sync. Refreshed when the Monitor screen appears.
+    @Published var hasPairedWatch = false
+    /// True while live Watch metrics (heart rate / energy) are flowing in. When this
+    /// is false the iPhone shows "Requires Apple Watch Sync" and heart rate drops out
+    /// of the break-risk equation.
+    @Published var isWatchSynced = false
+
+    /// Placeholder shown for Watch-only values when no Watch is syncing.
+    static let requiresWatchText = "Requires Apple Watch Sync"
+
+    // MARK: - Singleton
+
+    /// Shared instance so WatchConnectivity (via ``WalkHistory``) can drive the same
+    /// manager the UI observes — needed for remote start/stop and live metric sync.
+    static let shared = HealthKitManager()
+
+    private override init() {
+        super.init()
+        setupConnectivityHooks()
+    }
+
+    /// Wires the WatchConnectivity callbacks to this manager. Remote start/stop act
+    /// only when they change state, and pass `fromRemote: true` so they don't echo a
+    /// command back to the sender.
+    private func setupConnectivityHooks() {
+        let history = WalkHistory.shared
+        history.onRemoteStart = { [weak self] in
+            guard let self, !self.isTracking else { return }
+            self.requestAuthorizationAndStart(fromRemote: true)
+        }
+        history.onRemoteStop = { [weak self] in
+            guard let self, self.isTracking else { return }
+            self.stopSession(fromRemote: true)
+        }
+        history.onRemotePause = { [weak self] in
+            guard let self, self.isTracking, !self.isPaused else { return }
+            self.pauseSession(fromRemote: true)
+        }
+        history.onRemoteResume = { [weak self] in
+            guard let self, self.isPaused else { return }
+            self.resumeSession(fromRemote: true)
+        }
+        #if os(iOS)
+        history.onLiveMetrics = { [weak self] metrics in
+            self?.applyWatchLiveMetrics(metrics)
+        }
+        #endif
+    }
+
     // MARK: - Shared dependencies & tuning
 
     private let healthStore = HKHealthStore()
     private let notificationCenter = UNUserNotificationCenter.current()
     private let riskModel = BreakRiskModel()
+    /// Live IMU gait estimator. Runs on both platforms — iPhone (near the waist)
+    /// and Apple Watch (on the wrist, where it's rougher).
+    private let gaitAnalyzer = GaitAnalyzer()
 
     /// App Group shared with the Lock Screen widget extension. Must match the
     /// group ID enabled on both the app and widget targets in Xcode.
@@ -92,10 +155,20 @@ final class HealthKitManager: NSObject, ObservableObject {
     private var latestCadence: Double?
     private var latestStepLength: Double?
     private var latestWalkingSteadiness: Double?
+    /// Raw step-time variability (CV) from the IMU — stored per walk to build the
+    /// user's personal steadiness baseline (see ``SteadinessCalibration``).
+    private var latestStepVariability: Double?
     private var latestAsymmetry: Double?
     private var latestDoubleSupport: Double?
     private var latestHeartRateFraction: Double?
     private var latestHeartRate: Double?
+    /// kcal of active energy burned this walk. On watch it comes from the workout; on
+    /// iPhone it's mirrored from the watch. Feeds the break-risk equation's exertion term.
+    private var latestActiveEnergyKcal: Double?
+    /// iPhone-side: when live Watch metrics last arrived, used to detect a dropped sync.
+    private var lastWatchMetricsDate = Date.distantPast
+    /// Sync is considered lost if no Watch metrics arrive for this long.
+    private let watchSyncTimeout: TimeInterval = 10
     private var latestRisk = 0.0
     private var latestStepCount = 0 { didSet { if latestStepCount > oldValue { lastMovementDate = Date() } } }
     private var latestDistance = 0.0 { didSet { if latestDistance > oldValue { lastMovementDate = Date() } } }
@@ -142,7 +215,6 @@ final class HealthKitManager: NSObject, ObservableObject {
     private var simulatorTimer: Timer?
     private var pedometerStart: Date?
     private let locationManager = CLLocationManager()
-    private let gaitAnalyzer = GaitAnalyzer()
     /// Holds an `Activity<WalkActivityAttributes>` while a walk is running.
     /// Stored as `Any?` so the property doesn't need availability annotation.
     private var liveActivity: Any?
@@ -158,10 +230,10 @@ final class HealthKitManager: NSObject, ObservableObject {
 
     // MARK: - Lifecycle (shared)
 
-    func requestAuthorizationAndStart() {
+    func requestAuthorizationAndStart(fromRemote: Bool = false) {
         requestNotificationAuthorization()
         requestHealthAuthorization { [weak self] in
-            self?.startSession()
+            self?.startSession(fromRemote: fromRemote)
         }
     }
 
@@ -176,7 +248,9 @@ final class HealthKitManager: NSObject, ObservableObject {
         #endif
     }
 
-    func stopSession() {
+    func stopSession(fromRemote: Bool = false) {
+        // Tell the other device to stop too, unless this stop was itself remote-driven.
+        if !fromRemote { WalkHistory.shared.sendCommand("stop") }
         let saved = saveWalk()
         isTracking = false
         isPaused = false
@@ -196,7 +270,8 @@ final class HealthKitManager: NSObject, ObservableObject {
         #endif
     }
 
-    func pauseSession() {
+    func pauseSession(fromRemote: Bool = false) {
+        if !fromRemote { WalkHistory.shared.sendCommand("pause") }
         isPaused = true
         if let segmentStartDate {
             accumulatedWalkTime += Date().timeIntervalSince(segmentStartDate)
@@ -208,7 +283,8 @@ final class HealthKitManager: NSObject, ObservableObject {
         monitoringMessage = "Monitoring paused. Data preserved."
     }
 
-    func resumeSession() {
+    func resumeSession(fromRemote: Bool = false) {
+        if !fromRemote { WalkHistory.shared.sendCommand("resume") }
         isPaused = false
         isTracking = true
         segmentStartDate = Date()
@@ -218,7 +294,7 @@ final class HealthKitManager: NSObject, ObservableObject {
         monitoringMessage = "Resumed live monitoring."
     }
 
-    private func startSession() {
+    private func startSession(fromRemote: Bool = false) {
         isTracking = true
         isPaused = false
         nextLongWalkWarning = maximumWalkDuration
@@ -240,6 +316,11 @@ final class HealthKitManager: NSObject, ObservableObject {
         startClock()
         startSensors()
 
+        #if os(watchOS)
+        // The Watch drives the iPhone: ask it to start too (unless it started us).
+        if !fromRemote { WalkHistory.shared.sendCommand("start") }
+        #endif
+
         #if os(iOS)
         if #available(iOS 16.2, *) { startLiveActivity() }
         #endif
@@ -250,10 +331,12 @@ final class HealthKitManager: NSObject, ObservableObject {
         latestCadence = nil
         latestStepLength = nil
         latestWalkingSteadiness = nil
+        latestStepVariability = nil
         latestAsymmetry = nil
         latestDoubleSupport = nil
         latestHeartRateFraction = nil
         latestHeartRate = nil
+        latestActiveEnergyKcal = nil
         latestRisk = 0
         latestStepCount = 0
         latestDistance = 0
@@ -262,6 +345,8 @@ final class HealthKitManager: NSObject, ObservableObject {
         metricRisks = [:]
         gaitHistory.removeAll()
         lastFatigueAlert = nil
+        isWatchSynced = false
+        lastWatchMetricsDate = .distantPast
     }
 
     /// Stores the finished walk in History. Accidental starts (hardly any walking)
@@ -292,9 +377,40 @@ final class HealthKitManager: NSObject, ObservableObject {
     private func tickClock() {
         elapsedTimeStatus = Self.durationFormatter.string(from: currentElapsed) ?? "0:00"
         checkWalkDuration()
+        checkWatchSyncStaleness()
         updateBreakRisk()
         checkFatigueTrend()
         sampleWalk()
+    }
+
+    /// iPhone-side: if the Watch stops sending live metrics, drop the sync so heart
+    /// rate leaves the equation and the Watch-only values revert to the placeholder.
+    private func checkWatchSyncStaleness() {
+        #if os(iOS)
+        guard isWatchSynced else { return }
+        guard Date().timeIntervalSince(lastWatchMetricsDate) > watchSyncTimeout else { return }
+        isWatchSynced = false
+        latestHeartRate = nil
+        latestHeartRateFraction = nil
+        heartRateStatus = Self.requiresWatchText
+        activeEnergyStatus = Self.requiresWatchText
+        #endif
+    }
+
+    /// iPhone-side: refresh the Apple Watch connection state, so the Start button and
+    /// the connect screen know what to show.
+    func refreshWatchAvailability() {
+        #if os(iOS)
+        let history = WalkHistory.shared
+        if history.isWatchAppInstalled {
+            watchAvailability = .connected
+        } else if history.isWatchPaired {
+            watchAvailability = .appNotInstalled
+        } else {
+            watchAvailability = .noWatch
+        }
+        hasPairedWatch = (watchAvailability == .connected)
+        #endif
     }
 
     /// Fatigue = a downward *trend* within the walk, not a single low reading.
@@ -347,10 +463,21 @@ final class HealthKitManager: NSObject, ObservableObject {
         guard isWalking else { return }
         recorder.sample(risk: latestRisk, speed: latestWalkingSpeed, cadence: latestCadence,
                         steadiness: latestWalkingSteadiness, asymmetry: latestAsymmetry,
-                        doubleSupport: latestDoubleSupport, heartRate: latestHeartRate)
+                        doubleSupport: latestDoubleSupport, heartRate: latestHeartRate,
+                        steadinessCV: latestStepVariability)
     }
 
     // MARK: - The "needs a break" equation (shared)
+
+    /// Live steadiness from raw step-time variability, personalized to the user once
+    /// they have enough walks (their steadiest walk anchors 100%). Falls back to the
+    /// generic estimate until the baseline exists.
+    private func calibratedSteadiness(variability cv: Double?, generic: Double?) -> Double? {
+        if let cv, let calibration = WalkHistory.shared.steadinessCalibration {
+            return calibration.steadiness(forCV: cv)
+        }
+        return generic
+    }
 
     private func updateBreakRisk() {
         let inputs = BreakRiskModel.Inputs(
@@ -363,6 +490,7 @@ final class HealthKitManager: NSObject, ObservableObject {
             heartRateFraction: latestHeartRateFraction,
             durationFraction: currentElapsed / maximumWalkDuration,
             flightsClimbed: latestFlights,
+            activeEnergy: latestActiveEnergyKcal,
             stepCount: latestStepCount
         )
 
@@ -431,6 +559,22 @@ final class HealthKitManager: NSObject, ObservableObject {
         #if os(iOS)
         if #available(iOS 16.2, *) { updateLiveActivity() }
         #endif
+    }
+
+    /// At launch, if no walk is actually running, reset the shared App Group snapshot
+    /// so a widget / complication left over from a swiped-away walk doesn't keep
+    /// showing a stale "Monitoring" state. Runs on both iPhone and Apple Watch.
+    func clearWidgetSnapshotIfIdle() {
+        guard !isTracking, let defaults = UserDefaults(suiteName: Self.appGroupID) else { return }
+        defaults.set(false, forKey: "wb.isTracking")
+        defaults.set(0, forKey: "wb.risk")
+        defaults.set("0", forKey: "wb.steps")
+        defaults.set("0 m", forKey: "wb.distance")
+        defaults.set("0:00", forKey: "wb.time")
+        defaults.set("–", forKey: "wb.heartRate")
+        defaults.set("–", forKey: "wb.energy")
+        defaults.set(Date(), forKey: "wb.updated")
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private func breakMessage(from reasons: [String]) -> String {
@@ -573,7 +717,8 @@ extension HealthKitManager {
         gaitAnalyzer.onUpdate = { [weak self] metrics in
             guard let self else { return }
 
-            if let steadiness = metrics.steadiness {
+            self.latestStepVariability = metrics.stepTimeVariability
+            if let steadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness) {
                 self.latestWalkingSteadiness = steadiness
                 self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness))
                     ?? "\(Int(steadiness * 100))%"
@@ -645,12 +790,67 @@ extension HealthKitManager {
             return
         }
 
-        healthStore.requestAuthorization(toShare: nil, read: iOSReadTypes()) { [weak self] _, _ in
+        // Sharing the workout type lets us launch a mirrored workout on the Watch
+        // via `startWatchApp(with:)`.
+        healthStore.requestAuthorization(toShare: [HKQuantityType.workoutType()], read: iOSReadTypes()) { [weak self] _, _ in
             DispatchQueue.main.async {
                 self?.refreshGaitBaseline()
                 completion()
             }
         }
+    }
+
+    // MARK: - Start options (with / without Apple Watch)
+
+    /// Start a walk and launch the companion Watch workout so heart rate and energy
+    /// stream back. Called when the user chooses to sync at Start. The Watch is
+    /// launched only after authorization completes, since `startWatchApp` needs the
+    /// workout-share grant.
+    func startWithWatch() {
+        requestNotificationAuthorization()
+        requestHealthAuthorization { [weak self] in
+            self?.startWatchWorkout()
+            self?.startSession()
+        }
+    }
+
+    /// Start a walk on iPhone only. Watch-only values show the "Requires Apple Watch
+    /// Sync" placeholder until (if ever) a Watch connects.
+    func startWithoutWatch() {
+        heartRateStatus = Self.requiresWatchText
+        activeEnergyStatus = Self.requiresWatchText
+        requestAuthorizationAndStart()
+    }
+
+    /// Launches / wakes the companion watchOS app into a walking workout session.
+    /// The Watch picks this up in its `WKApplicationDelegate.handle(_:)`.
+    private func startWatchWorkout() {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .walking
+        configuration.locationType = .outdoor
+        healthStore.startWatchApp(with: configuration) { _, _ in }
+    }
+
+    /// Applies live heart-rate / energy readings streamed from the Apple Watch.
+    /// Ignored unless a walk is active, so `isWatchSynced` can't get stuck on between
+    /// walks (the staleness check only runs while the clock is ticking).
+    private func applyWatchLiveMetrics(_ metrics: WalkHistory.LiveMetrics) {
+        guard isTracking, !isPaused else { return }
+        lastWatchMetricsDate = Date()
+        isWatchSynced = true
+        if let heartRate = metrics.heartRate {
+            latestHeartRate = heartRate
+            heartRateStatus = "\(Int(heartRate)) bpm"
+        }
+        if let fraction = metrics.heartRateFraction {
+            latestHeartRateFraction = fraction
+        }
+        if let kcal = metrics.activeEnergyKcal {
+            latestActiveEnergyKcal = kcal
+            activeEnergyStatus = "\(Int(kcal)) kcal"
+        }
+        updateBreakRisk()
     }
 
     private func iOSReadTypes() -> Set<HKObjectType> {
@@ -878,10 +1078,47 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
 
     private func startSensors() {
         startWorkoutSession()
+        startWatchGaitAnalysis()
     }
 
     private func stopSensors() {
         workoutSession?.end()
+        gaitAnalyzer.stop()
+    }
+
+    /// Live gait quality from the wrist IMU, so the Watch shows steadiness,
+    /// asymmetry, double-support and step length like the iPhone. Speed and
+    /// cadence stay sourced from the workout (more reliable than the wrist).
+    private func startWatchGaitAnalysis() {
+        guard gaitAnalyzer.isAvailable else { return }
+        steadinessStatus = "Waiting for Data"
+        asymmetryStatus = "Waiting for Data"
+        doubleSupportStatus = "Waiting for Data"
+        gaitAnalyzer.onUpdate = { [weak self] metrics in
+            guard let self else { return }
+            self.latestStepVariability = metrics.stepTimeVariability
+            if let steadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness) {
+                self.latestWalkingSteadiness = steadiness
+                self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness)) ?? "\(Int(steadiness * 100))%"
+            }
+            if let asymmetry = metrics.asymmetry {
+                self.latestAsymmetry = asymmetry
+                self.asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: asymmetry)) ?? "\(Int(asymmetry * 100))%"
+            }
+            if let doubleSupport = metrics.doubleSupport {
+                self.latestDoubleSupport = doubleSupport
+                self.doubleSupportStatus = Self.percentFormatter.string(from: NSNumber(value: doubleSupport)) ?? "\(Int(doubleSupport * 100))%"
+            }
+            // Step length = workout speed / cadence (don't override the workout's
+            // own speed/cadence with the wrist estimate).
+            if let speed = self.latestWalkingSpeed, let cadence = self.latestCadence, cadence > 0 {
+                let length = speed / cadence
+                self.latestStepLength = length
+                self.stepLengthStatus = Self.metersString(length)
+            }
+            self.updateBreakRisk()
+        }
+        gaitAnalyzer.start()
     }
 
     private func requestHealthAuthorization(completion: @escaping () -> Void) {
@@ -974,6 +1211,7 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             }
         case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
             if let kcal = statistics.sumQuantity()?.doubleValue(for: .kilocalorie()) {
+                latestActiveEnergyKcal = kcal
                 activeEnergyStatus = "\(Int(kcal)) kcal"
             }
         case HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning):
@@ -981,14 +1219,19 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
                 latestDistance = meters
                 distanceStatus = Self.metersString(meters)
                 let seconds = currentElapsed
-                if seconds > 0 { latestWalkingSpeed = meters / seconds }
+                if seconds > 0 {
+                    latestWalkingSpeed = meters / seconds
+                    currentPaceStatus = Self.speedString(meters / seconds)
+                }
             }
         case HKQuantityType.quantityType(forIdentifier: .stepCount):
             if let steps = statistics.sumQuantity()?.doubleValue(for: .count()) {
                 latestStepCount = Int(steps)
                 stepsStatus = "\(latestStepCount)"
-                let minutes = currentElapsed / 60
-                if minutes > 0 { latestCadence = steps / currentElapsed }
+                if currentElapsed > 0 {
+                    latestCadence = steps / currentElapsed
+                    cadenceStatus = "\(Int((steps / currentElapsed) * 60)) steps/min"
+                }
             }
         case HKQuantityType.quantityType(forIdentifier: .flightsClimbed):
             if let flights = statistics.sumQuantity()?.doubleValue(for: .count()) {
@@ -999,6 +1242,13 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             break
         }
         updateBreakRisk()
+
+        // Stream the Watch-only readings to the iPhone so both devices match.
+        WalkHistory.shared.sendLiveMetrics(
+            WalkHistory.LiveMetrics(heartRate: latestHeartRate,
+                                    heartRateFraction: latestHeartRateFraction,
+                                    activeEnergyKcal: latestActiveEnergyKcal)
+        )
     }
 
     // MARK: HKWorkoutSessionDelegate

@@ -72,7 +72,7 @@ struct WatchHistoryView: View {
                     ContentUnavailableView(
                         "No walks yet",
                         systemImage: "chart.line.uptrend.xyaxis",
-                        description: Text("Finish a walk to see your trend here.")
+                        description: Text("Finish a walk of at least 5 minutes to see your trend here.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 120)
                 } else {

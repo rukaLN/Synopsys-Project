@@ -18,17 +18,23 @@ import SwiftUI
 
 private enum WalkWidgetData {
     static let appGroupID = "group.Walking-Buddy.shared"
+    /// A live walk refreshes the snapshot every second. If the last update is older
+    /// than this, the app was swiped away mid-walk — treat the walk as stopped so the
+    /// widget doesn't get stuck showing "Monitoring".
+    static let staleAfter: TimeInterval = 90
 
     static func load() -> WalkEntry {
         let defaults = UserDefaults(suiteName: appGroupID)
-        let isTracking = defaults?.bool(forKey: "wb.isTracking") ?? false
+        let updated = defaults?.object(forKey: "wb.updated") as? Date
+        let fresh = updated.map { Date().timeIntervalSince($0) < staleAfter } ?? false
+        let isTracking = fresh && (defaults?.bool(forKey: "wb.isTracking") ?? false)
         var entry = WalkEntry(
             date: Date(),
             isTracking: isTracking,
-            risk: defaults?.integer(forKey: "wb.risk") ?? 0,
-            steps: defaults?.string(forKey: "wb.steps") ?? "0",
-            distance: defaults?.string(forKey: "wb.distance") ?? "0 m",
-            time: defaults?.string(forKey: "wb.time") ?? "0:00"
+            risk: isTracking ? (defaults?.integer(forKey: "wb.risk") ?? 0) : 0,
+            steps: isTracking ? (defaults?.string(forKey: "wb.steps") ?? "0") : "0",
+            distance: isTracking ? (defaults?.string(forKey: "wb.distance") ?? "0 m") : "0 m",
+            time: isTracking ? (defaults?.string(forKey: "wb.time") ?? "0:00") : "0:00"
         )
         // Float the widget to the top of the Smart Stack while a walk is live.
         entry.relevance = TimelineEntryRelevance(score: isTracking ? 100 : 10)

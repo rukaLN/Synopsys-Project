@@ -213,7 +213,7 @@ struct HistoryView: View {
         let missing = WalkTrends.minimumWalks - history.walks.count
         if missing > 0 {
             return ("Keep walking", "figure.walk", Theme.brandTeal,
-                    "Finish \(missing) more walk\(missing == 1 ? "" : "s") and Walking Buddy will start comparing them to spot trends.")
+                    "Finish \(missing) more walk\(missing == 1 ? "" : "s") of at least 5 minutes and Walking Buddy will start comparing them to spot trends. Walks shorter than 5 minutes aren\u{2019}t saved.")
         }
         let worse = trends.filter { $0.direction == .worse }      // most worrying first
         if worse.isEmpty {

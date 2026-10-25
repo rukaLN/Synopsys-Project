@@ -83,8 +83,6 @@
 		3581411D3085A4230085C2EE /* Walking Buddy WidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Walking Buddy WidgetExtension.entitlements"; sourceTree = "<group>"; };
 		358141223085A4FA0085C2EE /* Walking Buddy iOS WidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Walking Buddy iOS WidgetExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		358141393085A59A0085C2EE /* Walking Buddy iOS WidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Walking Buddy iOS WidgetExtension.entitlements"; sourceTree = "<group>"; };
-		35A8C704305B987100443600 /* Walking Buddy.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "Walking Buddy.xcodeproj"; sourceTree = "<group>"; };
-		35A8C722305BA11B00443600 /* Walking Buddy.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "Walking Buddy.xcodeproj"; sourceTree = "<group>"; };
 		35AA62F5301B041C0067AFD8 /* Walking Buddy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Walking Buddy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		35AFD043307B0EA500C643D5 /* Walking Buddy Watch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Walking Buddy Watch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -108,6 +106,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				BreakRiskModel.swift,
+				GaitAnalyzer.swift,
 				HapticsManager.swift,
 				HealthKitManager.swift,
 				WalkHistory.swift,
@@ -201,20 +200,6 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		35A8C706305B987100443600 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		35A8C724305BA11B00443600 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
 		35AA62EC301B041C0067AFD8 = {
 			isa = PBXGroup;
 			children = (
@@ -244,8 +229,6 @@
 		A3FAEE8B308845F6004096CF /* Recovered References */ = {
 			isa = PBXGroup;
 			children = (
-				35A8C722305BA11B00443600 /* Walking Buddy.xcodeproj */,
-				35A8C704305B987100443600 /* Walking Buddy.xcodeproj */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -385,16 +368,6 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 35AA62F6301B041C0067AFD8 /* Products */;
 			projectDirPath = "";
-			projectReferences = (
-				{
-					ProductGroup = 35A8C724305BA11B00443600 /* Products */;
-					ProjectRef = 35A8C722305BA11B00443600 /* Walking Buddy.xcodeproj */;
-				},
-				{
-					ProductGroup = 35A8C706305B987100443600 /* Products */;
-					ProjectRef = 35A8C704305B987100443600 /* Walking Buddy.xcodeproj */;
-				},
-			);
 			projectRoot = "";
 			targets = (
 				35AA62F4301B041C0067AFD8 /* Walking Buddy */,

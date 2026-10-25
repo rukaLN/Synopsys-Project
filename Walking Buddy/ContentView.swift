@@ -2,8 +2,12 @@ import SwiftUI
 import HealthKit
 
 struct ContentView: View {
-    @StateObject private var healthManager = HealthKitManager()
+    @ObservedObject private var healthManager = HealthKitManager.shared
     @State private var showingRiskInfo = false
+    @State private var showingWatchSyncPrompt = false
+    @State private var showingWatchConnect = false
+    /// Shows the Apple Watch setup screen once, the first time the app is opened.
+    @AppStorage("hasSeenWatchSetup") private var hasSeenWatchSetup = false
 
     var body: some View {
         // The alert sits on the TabView so it appears whichever tab is showing.
@@ -18,9 +22,16 @@ struct ContentView: View {
             HapticsManager.prepare()
             healthManager.refreshNotificationStatus()
             healthManager.clearOrphanedLiveActivitiesIfIdle()
+            healthManager.clearWidgetSnapshotIfIdle()
+            healthManager.refreshWatchAvailability()
+            if !hasSeenWatchSetup {
+                hasSeenWatchSetup = true
+                showingWatchConnect = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             healthManager.refreshNotificationStatus()
+            healthManager.refreshWatchAvailability()
         }
         .alert(isPresented: $healthManager.triggersAlert) {
             Alert(
@@ -45,13 +56,35 @@ struct ContentView: View {
                 riskHero
                 metricsGrid
                 controlButton
+                watchSyncButton
             }
             .padding(20)
             .padding(.bottom, 12)
         }
         .background(Theme.background.ignoresSafeArea())
         .sheet(isPresented: $showingRiskInfo) {
-            BreakRiskInfoView()
+            BreakRiskInfoView(heartRateActive: healthManager.isWatchSynced)
+        }
+        .sheet(isPresented: $showingWatchConnect) {
+            WatchConnectView()
+        }
+        .confirmationDialog("Do you have your Apple Watch with you?", isPresented: $showingWatchSyncPrompt, titleVisibility: .visible) {
+            Button("Yes \u{2014} start on both") { healthManager.startWithWatch() }
+            Button("No \u{2014} iPhone only") { healthManager.startWithoutWatch() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Wear your Apple Watch and we\u{2019}ll add live heart rate and active energy to this walk.")
+        }
+    }
+
+    /// Start a walk. If a synced Apple Watch is available, ask whether the user has it
+    /// with them before starting on both devices.
+    private func startTracking() {
+        healthManager.refreshWatchAvailability()
+        if healthManager.hasPairedWatch {
+            showingWatchSyncPrompt = true
+        } else {
+            healthManager.startWithoutWatch()
         }
     }
 
@@ -146,8 +179,10 @@ struct ContentView: View {
                 MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus, risk: risks["asymmetry"])
                 MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus, risk: risks["doubleSupport"])
                 MetricCard(icon: "ruler.fill", label: "Step Length", value: healthManager.stepLengthStatus, risk: risks["stepLength"])
+                MetricCard(icon: "heart.fill", label: "Heart Rate", value: healthManager.heartRateStatus, risk: risks["heartRate"])
+                MetricCard(icon: "flame.fill", label: "Active Energy", value: healthManager.activeEnergyStatus, risk: risks["activeEnergy"])
             }
-            Text("Steadiness, asymmetry, double support and step length are live estimates from your phone\u{2019}s motion sensors, not clinical Apple Health readings.")
+            Text("Steadiness, asymmetry, double support and step length are live estimates from your phone\u{2019}s motion sensors, not clinical Apple Health readings. Heart rate and active energy require a synced Apple Watch.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -177,8 +212,26 @@ struct ContentView: View {
             }
         } else {
             pillButton("Start Live Track", icon: "figure.walk", gradient: Theme.brandGradient, glow: Theme.brandTeal) {
-                healthManager.requestAuthorizationAndStart()
+                startTracking()
             }
+        }
+    }
+
+    /// Lets the user open the Apple Watch setup screen anytime — e.g. if they get a
+    /// Watch after already installing the app. Reflects the current connection state.
+    private var watchSyncButton: some View {
+        let connected = healthManager.watchAvailability == .connected
+        return Button {
+            healthManager.refreshWatchAvailability()
+            showingWatchConnect = true
+        } label: {
+            Label(connected ? "Apple Watch Connected" : "Sync Apple Watch",
+                  systemImage: connected ? "applewatch.radiowaves.left.and.right" : "applewatch")
+                .font(.subheadline).bold()
+                .foregroundStyle(connected ? Theme.brandTeal : .secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Theme.card, in: Capsule())
         }
     }
 
@@ -358,8 +411,9 @@ struct MetricCard: View {
             Text(value)
                 .font(.system(.title3, design: .rounded)).bold()
                 .foregroundStyle(valueColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(label)
                 .font(.caption)
@@ -377,6 +431,10 @@ struct MetricCard: View {
 /// Explains how the composite break-risk score is calculated, mirroring the live
 /// ``BreakRiskModel`` (weights, reference values, and threshold).
 struct BreakRiskInfoView: View {
+    /// Whether heart rate (an Apple Watch–only signal) is currently part of the
+    /// equation. Drives the sync banner and how the heart-rate row is shown.
+    var heartRateActive: Bool = false
+
     @Environment(\.dismiss) private var dismiss
     private let model = BreakRiskModel()
 
@@ -391,10 +449,11 @@ struct BreakRiskInfoView: View {
                         .foregroundStyle(.secondary)
 
                     equationCard
+                    syncStatusCard
                     legendCard
                     metricsCard
 
-                    Text("Metrics that aren\u{2019}t available on your device (for example heart rate on iPhone, or gait metrics on Apple Watch) simply drop out of both sums, so the score stays balanced.")
+                    Text("Metrics that aren\u{2019}t available (for example heart rate without a synced Apple Watch) simply drop out of both sums, so the score stays balanced on whichever signals you do have.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -429,6 +488,27 @@ struct BreakRiskInfoView: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
+    private var syncStatusCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: heartRateActive ? "applewatch.radiowaves.left.and.right" : "applewatch.slash")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(heartRateActive ? Theme.brandTeal : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(heartRateActive ? "Apple Watch connected" : "No Apple Watch sync")
+                    .font(.subheadline).bold()
+                Text(heartRateActive
+                     ? "Heart rate is included in your Break Risk score."
+                     : "Heart rate is excluded — your score uses the remaining signals. Sync an Apple Watch to include it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
     private var legendCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Reading the colors")
@@ -457,20 +537,22 @@ struct BreakRiskInfoView: View {
             Text("What goes into it")
                 .font(.headline)
             ForEach(model.metricInfo) { info in
+                let inactive = info.name == "Heart rate" && !heartRateActive
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text(info.name).font(.subheadline).bold()
                         Spacer()
-                        Text("weight \(String(format: "%g", info.weight))")
+                        Text(inactive ? "Requires Apple Watch Sync" : "weight \(String(format: "%g", info.weight))")
                             .font(.caption).bold()
-                            .foregroundStyle(Theme.brandTeal)
+                            .foregroundStyle(inactive ? Color.secondary : Theme.brandTeal)
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Theme.brandGreen.opacity(0.14), in: Capsule())
+                            .background((inactive ? Color.secondary : Theme.brandGreen).opacity(0.14), in: Capsule())
                     }
                     Text(info.rule)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .opacity(inactive ? 0.5 : 1)
             }
         }
         .padding(16)
@@ -479,8 +561,150 @@ struct BreakRiskInfoView: View {
     }
 }
 
+// MARK: - Apple Watch connect / setup
+
+/// Pairing-style setup screen for the Apple Watch. The WatchConnectivity link is
+/// automatic once both apps are installed, so this screen *reflects* the live
+/// connection state and guides the user when something is missing. Shown once on
+/// first run and reachable anytime from the "Sync Apple Watch" button.
+struct WatchConnectView: View {
+    @ObservedObject private var healthManager = HealthKitManager.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var pollTimer: Timer?
+
+    private var state: HealthKitManager.WatchAvailability { healthManager.watchAvailability }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 26) {
+                    watchGraphic
+                    statusBlock
+                    if state != .connected { stepsBlock }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("Apple Watch")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(state == .connected ? "Done" : "Close") { dismiss() }
+                }
+            }
+        }
+        .onAppear {
+            healthManager.refreshWatchAvailability()
+            // Poll while visible so the status updates live as the Watch connects.
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+                healthManager.refreshWatchAvailability()
+            }
+        }
+        .onDisappear {
+            pollTimer?.invalidate()
+            pollTimer = nil
+        }
+    }
+
+    private var accent: Color {
+        switch state {
+        case .connected: return Theme.brandGreen
+        case .appNotInstalled: return .orange
+        case .noWatch: return .secondary
+        }
+    }
+
+    private var watchGraphic: some View {
+        ZStack {
+            Circle()
+                .fill(accent.opacity(0.14))
+                .frame(width: 150, height: 150)
+            Image(systemName: "applewatch")
+                .font(.system(size: 72, weight: .regular))
+                .foregroundStyle(accent)
+            if state == .connected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(Theme.brandGreen)
+                    .background(Circle().fill(Theme.background))
+                    .offset(x: 50, y: 50)
+            }
+        }
+        .padding(.top, 12)
+    }
+
+    private var statusBlock: some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.title2).bold()
+                .multilineTextAlignment(.center)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var title: String {
+        switch state {
+        case .connected: return "Apple Watch Connected"
+        case .appNotInstalled: return "Add Walking Buddy to your Watch"
+        case .noWatch: return "No Apple Watch Found"
+        }
+    }
+
+    private var subtitle: String {
+        switch state {
+        case .connected:
+            return "You\u{2019}re all set. Heart rate and active energy will sync automatically during your walks, and starting a walk on one device starts it on both."
+        case .appNotInstalled:
+            return "Your Apple Watch is paired, but Walking Buddy isn\u{2019}t installed on it yet. Install it to sync heart rate and energy."
+        case .noWatch:
+            return "Walking Buddy works great on its own. Pair an Apple Watch to add live heart rate and active energy."
+        }
+    }
+
+    private var stepsBlock: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("How to connect")
+                .font(.headline)
+            if state == .appNotInstalled {
+                step(1, "Open the Apple Watch app on your iPhone.")
+                step(2, "Scroll to \u{201C}Available Apps\u{201D} and tap Install next to Walking Buddy.")
+                step(3, "Come back here \u{2014} it\u{2019}ll connect automatically.")
+            } else {
+                step(1, "Open the Apple Watch app on your iPhone.")
+                step(2, "Follow the steps to pair your Apple Watch.")
+                step(3, "Install Walking Buddy on the Watch, then return here.")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func step(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.subheadline).bold()
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Theme.brandTeal))
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 #Preview {
     ContentView()
+}
+
+#Preview("Apple Watch Connect") {
+    WatchConnectView()
 }
 
 #Preview("Break Risk Info") {

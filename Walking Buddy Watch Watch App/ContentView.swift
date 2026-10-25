@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var healthManager = HealthKitManager()
+    @ObservedObject private var healthManager = HealthKitManager.shared
 
     private static let brandGreen = Color(red: 0.22, green: 0.86, blue: 0.52)
     private static let brandTeal = Color(red: 0.02, green: 0.62, blue: 0.47)
@@ -18,7 +18,10 @@ struct ContentView: View {
             WatchRiskInfoView()
         }
         .tabViewStyle(.verticalPage)
-        .onAppear { HapticsManager.prepare() }
+        .onAppear {
+            HapticsManager.prepare()
+            healthManager.clearWidgetSnapshotIfIdle()
+        }
         .alert("Time to Rest!", isPresented: $healthManager.triggersAlert) {
             Button("OK, I'll sit down") { healthManager.pauseSession() }
         } message: {
@@ -47,11 +50,23 @@ struct ContentView: View {
 
                 VStack(spacing: 6) {
                     metricRow("Heart Rate", healthManager.heartRateStatus, risk: healthManager.metricRisks["heartRate"])
+                    metricRow("Speed", healthManager.currentPaceStatus, risk: healthManager.metricRisks["speed"])
+                    metricRow("Cadence", healthManager.cadenceStatus, risk: healthManager.metricRisks["cadence"])
                     metricRow("Steps", healthManager.stepsStatus)
                     metricRow("Distance", healthManager.distanceStatus)
                     metricRow("Flights", healthManager.flightsStatus, risk: healthManager.metricRisks["flights"])
-                    metricRow("Energy", healthManager.activeEnergyStatus)
+                    metricRow("Steadiness", healthManager.steadinessStatus, risk: healthManager.metricRisks["steadiness"])
+                    metricRow("Asymmetry", healthManager.asymmetryStatus, risk: healthManager.metricRisks["asymmetry"])
+                    metricRow("Double Support", healthManager.doubleSupportStatus, risk: healthManager.metricRisks["doubleSupport"])
+                    metricRow("Step Length", healthManager.stepLengthStatus, risk: healthManager.metricRisks["stepLength"])
+                    metricRow("Energy", healthManager.activeEnergyStatus, risk: healthManager.metricRisks["activeEnergy"])
                     metricRow("Time", healthManager.elapsedTimeStatus, risk: healthManager.metricRisks["duration"])
+
+                    Text("Steadiness, asymmetry, double support & step length are wrist estimates.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
 
                 if healthManager.isPaused {
