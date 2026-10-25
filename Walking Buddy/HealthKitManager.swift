@@ -325,8 +325,11 @@ final class HealthKitManager: NSObject, ObservableObject {
         segmentStartDate = nil
         riskTripStart = nil
         stopClock()
-        stopSensors()
+        pauseSensors()
         monitoringMessage = "Monitoring paused. Data preserved."
+        // Publish a paused snapshot so the widget/complication shows "Paused" with the
+        // frozen values instead of going stale and resetting to zero.
+        publishWidgetSnapshot()
     }
 
     func resumeSession(fromRemote: Bool = false) {
@@ -336,8 +339,9 @@ final class HealthKitManager: NSObject, ObservableObject {
         segmentStartDate = Date()
         lastMovementDate = Date()
         startClock()
-        startSensors()
+        resumeSensors()
         monitoringMessage = "Resumed live monitoring."
+        publishWidgetSnapshot()
     }
 
     private func startSession(fromRemote: Bool = false) {
@@ -601,6 +605,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     private func publishWidgetSnapshot() {
         guard let defaults = UserDefaults(suiteName: Self.appGroupID) else { return }
         defaults.set(isTracking, forKey: "wb.isTracking")
+        defaults.set(isPaused, forKey: "wb.isPaused")
         defaults.set(riskPercentInt, forKey: "wb.risk")
         defaults.set(stepsStatus, forKey: "wb.steps")
         defaults.set(distanceStatus, forKey: "wb.distance")
@@ -623,6 +628,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     func clearWidgetSnapshotIfIdle() {
         guard !isTracking, let defaults = UserDefaults(suiteName: Self.appGroupID) else { return }
         defaults.set(false, forKey: "wb.isTracking")
+        defaults.set(false, forKey: "wb.isPaused")
         defaults.set(0, forKey: "wb.risk")
         defaults.set("0", forKey: "wb.steps")
         defaults.set("0 m", forKey: "wb.distance")
@@ -836,6 +842,23 @@ extension HealthKitManager {
         simulatorTimer?.invalidate()
         simulatorTimer = nil
         locationManager.stopUpdatingLocation()
+    }
+
+    /// Pause live sensors; `stopSensors` already preserves `pedometerStart`, so resuming
+    /// continues the same cumulative step/distance count rather than restarting at zero.
+    private func pauseSensors() {
+        stopSensors()
+    }
+
+    private func resumeSensors() {
+        startBackgroundLocation()
+        observeForegroundReturn()
+        #if targetEnvironment(simulator)
+        startSimulatedWalkingUpdates()
+        #else
+        startPedometerUpdates(from: pedometerStart ?? Date())
+        startLiveGaitAnalysis()
+        #endif
     }
 
     /// Keeps the app alive with the screen off / backgrounded by running
@@ -1441,6 +1464,19 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
         gaitAnalyzer.stop()
     }
 
+    /// Pause the live workout *without ending it*, so its cumulative stats (steps,
+    /// distance, energy) are preserved and the workout stays active — otherwise the
+    /// Smart Stack loses its workout relevance and the metrics collapse to zero.
+    private func pauseSensors() {
+        workoutSession?.pause()
+        gaitAnalyzer.stop()
+    }
+
+    private func resumeSensors() {
+        workoutSession?.resume()
+        startWatchGaitAnalysis()
+    }
+
     /// Live gait quality from the wrist IMU, so the Watch shows steadiness,
     /// asymmetry, double-support and step length like the iPhone. Speed and
     /// cadence stay sourced from the workout (more reliable than the wrist).
@@ -1548,10 +1584,14 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
             let builder = session.associatedWorkoutBuilder()
             let dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
-            // Flights aren't collected for a walking workout by default; opt in so
-            // the Watch counts stair exertion like the iPhone's pedometer does.
+            // Flights and step count aren't collected for a walking workout by default;
+            // opt in so the Watch reports steps (and the cadence / step-length derived
+            // from them) and stair exertion like the iPhone's pedometer does.
             if let flights = HKQuantityType.quantityType(forIdentifier: .flightsClimbed) {
                 dataSource.enableCollection(for: flights, predicate: nil)
+            }
+            if let steps = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+                dataSource.enableCollection(for: steps, predicate: nil)
             }
             builder.dataSource = dataSource
             session.delegate = self

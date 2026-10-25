@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var showingRiskInfo = false
     @State private var showingWatchSyncPrompt = false
     @State private var showingWatchConnect = false
+    @State private var confirmingStop = false
     /// Shows the Apple Watch setup screen once, the first time the app is opened.
     @AppStorage("hasSeenWatchSetup") private var hasSeenWatchSetup = false
 
@@ -55,6 +56,12 @@ struct ContentView: View {
                 if healthManager.isTracking && healthManager.locationNeedsAlways { locationBanner }
                 riskHero
                 controlButton
+                    .confirmationDialog("End this walk?", isPresented: $confirmingStop, titleVisibility: .visible) {
+                        Button("End Walk", role: .destructive) { healthManager.stopSession() }
+                        Button("Keep Walking", role: .cancel) {}
+                    } message: {
+                        Text("This stops monitoring and ends your current walk. Walks of at least 5 minutes are saved to History.")
+                    }
                 metricsGrid
                 watchSyncButton
                 healthAccessButton
@@ -228,7 +235,7 @@ struct ContentView: View {
                     healthManager.resumeSession()
                 }
                 pillButton("Stop", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
-                    healthManager.stopSession()
+                    confirmingStop = true
                 }
             }
         } else if healthManager.isTracking {
@@ -237,7 +244,7 @@ struct ContentView: View {
                     healthManager.pauseSession()
                 }
                 pillButton("Stop", icon: "stop.fill", gradient: Self.stopGradient, glow: .red) {
-                    healthManager.stopSession()
+                    confirmingStop = true
                 }
             }
         } else {

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject private var healthManager = HealthKitManager.shared
+    @State private var confirmingStop = false
 
     private static let brandGreen = Color(red: 0.22, green: 0.86, blue: 0.52)
     private static let brandTeal = Color(red: 0.02, green: 0.62, blue: 0.47)
@@ -26,11 +27,6 @@ struct ContentView: View {
             Button("OK, I'll sit down") { healthManager.pauseSession() }
         } message: {
             Text(healthManager.alertMessage)
-        }
-        .alert("Health Access", isPresented: $healthManager.healthAccessNeedsSettings) {
-            Button("OK") {}
-        } message: {
-            Text("Health access was already set. If walk data is missing, re-enable it in Settings \u{2192} Privacy & Security \u{2192} Health on your Apple Watch, or from the Health app on your iPhone.")
         }
     }
 
@@ -56,6 +52,12 @@ struct ContentView: View {
                 elapsedTime
 
                 controls
+                    .confirmationDialog("End this walk?", isPresented: $confirmingStop, titleVisibility: .visible) {
+                        Button("End Walk", role: .destructive) { healthManager.stopSession() }
+                        Button("Keep Walking", role: .cancel) {}
+                    } message: {
+                        Text("Walks of at least 5 minutes are saved to History.")
+                    }
 
                 VStack(spacing: 6) {
                     metricRow("Heart Rate", healthManager.heartRateStatus, risk: healthManager.metricRisks["heartRate"])
@@ -83,6 +85,11 @@ struct ContentView: View {
                     Label("Health Access", systemImage: "heart.text.square").frame(maxWidth: .infinity)
                 }
                 .tint(.gray)
+                .alert("Health Access", isPresented: $healthManager.healthAccessNeedsSettings) {
+                    Button("OK") {}
+                } message: {
+                    Text("Health access was already set. If walk data is missing, re-enable it in Settings \u{2192} Privacy & Security \u{2192} Health on your Apple Watch, or from the Health app on your iPhone.")
+                }
             }
             .padding(.horizontal, 4)
         }
@@ -115,7 +122,7 @@ struct ContentView: View {
             }
             .tint(Self.brandTeal)
             Button {
-                healthManager.stopSession()
+                confirmingStop = true
             } label: {
                 Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
             }
@@ -129,7 +136,7 @@ struct ContentView: View {
             }
             .tint(Self.brandTeal)
             Button {
-                healthManager.stopSession()
+                confirmingStop = true
             } label: {
                 Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
             }

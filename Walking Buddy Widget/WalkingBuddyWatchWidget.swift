@@ -27,11 +27,16 @@ private enum WatchWidgetData {
     static func load() -> WatchEntry {
         let defaults = UserDefaults(suiteName: appGroupID)
         let updated = defaults?.object(forKey: "wb.updated") as? Date
-        let fresh = updated.map { Date().timeIntervalSince($0) < staleAfter } ?? false
+        let isPaused = defaults?.bool(forKey: "wb.isPaused") ?? false
+        let recentlyUpdated = updated.map { Date().timeIntervalSince($0) < staleAfter } ?? false
+        // A paused walk legitimately stops refreshing the snapshot, so don't mistake
+        // that for the app being swiped away (which would zero everything out).
+        let fresh = isPaused || recentlyUpdated
         let isTracking = fresh && (defaults?.bool(forKey: "wb.isTracking") ?? false)
         var entry = WatchEntry(
             date: Date(),
             isTracking: isTracking,
+            isPaused: isTracking && isPaused,
             risk: isTracking ? (defaults?.integer(forKey: "wb.risk") ?? 0) : 0,
             heartRate: isTracking ? (defaults?.string(forKey: "wb.heartRate") ?? "–") : "–",
             steps: isTracking ? (defaults?.string(forKey: "wb.steps") ?? "0") : "0",
@@ -46,6 +51,7 @@ private enum WatchWidgetData {
 struct WatchEntry: TimelineEntry {
     let date: Date
     let isTracking: Bool
+    var isPaused: Bool = false
     let risk: Int
     let heartRate: String
     let steps: String
@@ -130,7 +136,7 @@ struct WatchWidgetEntryView: View {
                 .tint(riskColor(entry.risk))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.isTracking ? "Monitoring" : "Walking Buddy")
+                    Text(entry.isPaused ? "Paused" : (entry.isTracking ? "Monitoring" : "Walking Buddy"))
                         .font(.caption).bold()
                         .widgetAccentable()
                     Text("Break risk \(entry.risk)%")
