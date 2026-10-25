@@ -539,12 +539,26 @@ final class HealthKitManager: NSObject, ObservableObject {
         return generic
     }
 
+    /// Refreshes the displayed/stored steadiness as an Apple-style composite of the
+    /// live gait-quality signals (speed, step length, double support, asymmetry). It's
+    /// a summary only — ``BreakRiskModel`` deliberately keeps it out of the risk score.
+    private func updateCompositeSteadiness() {
+        guard let steadiness = riskModel.compositeSteadiness(
+            walkingSpeed: latestWalkingSpeed,
+            stepLength: latestStepLength,
+            doubleSupport: latestDoubleSupport,
+            asymmetry: latestAsymmetry
+        ) else { return }
+        latestWalkingSteadiness = steadiness
+        steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness)) ?? "\(Int(steadiness * 100))%"
+    }
+
     private func updateBreakRisk() {
+        updateCompositeSteadiness()
         let inputs = BreakRiskModel.Inputs(
             walkingSpeed: latestWalkingSpeed,
             cadence: latestCadence,
             stepLength: latestStepLength,
-            steadiness: latestWalkingSteadiness,
             asymmetry: latestAsymmetry,
             doubleSupport: latestDoubleSupport,
             heartRateFraction: latestHeartRateFraction,
@@ -789,10 +803,9 @@ extension HealthKitManager {
 
             self.latestStepVariability = metrics.stepTimeVariability
 
-            // Capture the phone's own raw estimates first (kept for calibration even
-            // when the Watch is driving the display).
-            let rawSteadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness)
-            if let rawSteadiness { self.phoneRawSteadiness = rawSteadiness }
+            // Capture the phone's own raw cadence / step length (kept for calibration
+            // even when the Watch is driving the display). Steadiness is no longer taken
+            // from here — it's recomputed as a composite in `updateCompositeSteadiness`.
             if let cadence = metrics.cadence { self.phoneRawCadence = cadence }
             if let speed = self.phoneRawSpeed, let cadence = self.phoneRawCadence, cadence > 0 {
                 self.phoneRawStepLength = speed / cadence
@@ -802,12 +815,6 @@ extension HealthKitManager {
             // above feed calibration, but we don't display the phone's own estimates.
             guard !self.watchOwnsLiveMetrics else { return }
 
-            if let rawSteadiness {
-                let steadiness = min(max(SensorCalibration.shared.corrected(.steadiness, rawSteadiness), 0), 1)
-                self.latestWalkingSteadiness = steadiness
-                self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness))
-                    ?? "\(Int(steadiness * 100))%"
-            }
             if let asymmetry = metrics.asymmetry {
                 self.latestAsymmetry = asymmetry
                 self.asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: asymmetry))
@@ -1217,12 +1224,9 @@ extension HealthKitManager {
     /// handful of times per day, so they act as a quality baseline rather than a
     /// live signal — but they still feed the break equation.
     private func refreshGaitBaseline() {
-        fetchMostRecent(.appleWalkingSteadiness, unit: .percent()) { [weak self] value in
-            guard let self, let value else { return }
-            self.latestWalkingSteadiness = value
-            self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
-            self.updateBreakRisk()
-        }
+        // Steadiness is no longer read directly from Health — it's a composite of the
+        // signals below (see `updateCompositeSteadiness`). We still seed asymmetry,
+        // double support and step length from Health so the composite has inputs early.
         fetchMostRecent(.walkingAsymmetryPercentage, unit: .percent()) { [weak self] value in
             guard let self, let value else { return }
             self.latestAsymmetry = value
@@ -1488,10 +1492,8 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
         gaitAnalyzer.onUpdate = { [weak self] metrics in
             guard let self else { return }
             self.latestStepVariability = metrics.stepTimeVariability
-            if let steadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness) {
-                self.latestWalkingSteadiness = steadiness
-                self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness)) ?? "\(Int(steadiness * 100))%"
-            }
+            // Steadiness is recomputed as a composite in `updateCompositeSteadiness`
+            // (from speed / step length / double support / asymmetry).
             if let asymmetry = metrics.asymmetry {
                 self.latestAsymmetry = asymmetry
                 self.asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: asymmetry)) ?? "\(Int(asymmetry * 100))%"

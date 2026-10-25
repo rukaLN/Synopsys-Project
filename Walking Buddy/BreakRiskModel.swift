@@ -46,14 +46,17 @@ struct BreakRiskModel {
     // MARK: - Weights (relative importance of each signal)
 
     private enum Metric: String, CaseIterable {
-        case speed, cadence, stepLength, steadiness, asymmetry, doubleSupport, heartRate, duration, flights, activeEnergy
+        case speed, cadence, stepLength, asymmetry, doubleSupport, heartRate, duration, flights, activeEnergy
     }
 
+    // Steadiness is intentionally NOT a scored term: it's a composite of walking
+    // speed, step length, double support and asymmetry (see `compositeSteadiness`),
+    // all of which the equation already scores individually. Scoring it too would
+    // double-count those signals. It's computed as a display/trend summary instead.
     private let weights: [Metric: Double] = [
         .speed: 1.0,
         .cadence: 1.0,
         .stepLength: 1.0,
-        .steadiness: 1.5,
         .asymmetry: 1.2,
         .doubleSupport: 1.2,
         .heartRate: 1.3,
@@ -68,7 +71,6 @@ struct BreakRiskModel {
         var walkingSpeed: Double?        // m/s
         var cadence: Double?             // steps/s
         var stepLength: Double?          // m
-        var steadiness: Double?          // 0...1
         var asymmetry: Double?           // 0...1 (fraction)
         var doubleSupport: Double?       // 0...1 (fraction)
         var heartRateFraction: Double?   // 0...1 of max HR
@@ -120,9 +122,6 @@ struct BreakRiskModel {
         contribute(.stepLength,
                    input.stepLength.map { deficit(value: $0, safe: safeStepLength) },
                    reason: "your steps are getting shorter")
-        contribute(.steadiness,
-                   input.steadiness.map { deficit(value: $0, safe: steadinessFloor) },
-                   reason: "walking steadiness is low")
         contribute(.asymmetry,
                    input.asymmetry.map { excess(value: $0, normal: normalAsymmetry, ceiling: asymmetryCeiling) },
                    reason: "your steps are becoming uneven")
@@ -169,8 +168,6 @@ struct BreakRiskModel {
                        rule: "Risk climbs as cadence slows below \(String(format: "%.1f", safeCadence)) steps/s."),
             MetricInfo(name: "Step length", weight: weights[.stepLength] ?? 0,
                        rule: "Risk climbs as steps shorten below \(String(format: "%.2f", safeStepLength)) m."),
-            MetricInfo(name: "Steadiness", weight: weights[.steadiness] ?? 0,
-                       rule: "Risk climbs as steadiness drops below \(pct(steadinessFloor))."),
             MetricInfo(name: "Asymmetry", weight: weights[.asymmetry] ?? 0,
                        rule: "Risk rises from \(pct(normalAsymmetry)) up to \(pct(asymmetryCeiling)) unevenness."),
             MetricInfo(name: "Double support", weight: weights[.doubleSupport] ?? 0,
@@ -199,5 +196,32 @@ struct BreakRiskModel {
     private func excess(value: Double, normal: Double, ceiling: Double) -> Double {
         guard ceiling > normal else { return value > normal ? 1 : 0 }
         return (value - normal) / (ceiling - normal)
+    }
+
+    /// A live "walking steadiness" summary in the Apple style: a 0...1 blend of how
+    /// safe the gait-quality signals are — walking speed, step length, double-support
+    /// time and asymmetry (1 = very steady). Averages whichever inputs are available,
+    /// so it reports as soon as any exist; returns nil only when none do.
+    ///
+    /// This is a *display / trend* metric derived from signals the break-risk equation
+    /// already scores individually, so it is deliberately NOT fed back into the score.
+    func compositeSteadiness(walkingSpeed: Double?, stepLength: Double?,
+                             doubleSupport: Double?, asymmetry: Double?) -> Double? {
+        var subRisks: [Double] = []
+        if let speed = walkingSpeed {
+            subRisks.append(min(max(deficit(value: speed, safe: safeWalkingSpeed), 0), 1))
+        }
+        if let length = stepLength {
+            subRisks.append(min(max(deficit(value: length, safe: safeStepLength), 0), 1))
+        }
+        if let ds = doubleSupport {
+            subRisks.append(min(max(excess(value: ds, normal: normalDoubleSupport, ceiling: doubleSupportCeiling), 0), 1))
+        }
+        if let asym = asymmetry {
+            subRisks.append(min(max(excess(value: asym, normal: normalAsymmetry, ceiling: asymmetryCeiling), 0), 1))
+        }
+        guard !subRisks.isEmpty else { return nil }
+        let averageRisk = subRisks.reduce(0, +) / Double(subRisks.count)
+        return 1 - averageRisk
     }
 }
