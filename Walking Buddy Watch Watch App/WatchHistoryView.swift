@@ -68,7 +68,7 @@ struct WatchHistoryView: View {
                     .font(.headline)
                     .foregroundStyle(Self.brandGreen)
 
-                if points.count < 2 {
+                if history.walks.isEmpty {
                     ContentUnavailableView(
                         "No walks yet",
                         systemImage: "chart.line.uptrend.xyaxis",
@@ -76,17 +76,27 @@ struct WatchHistoryView: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
+                    // Always show the metric picker, so you can switch metrics even when
+                    // the selected one doesn't yet have enough data to chart.
                     Picker("Metric", selection: $metric) {
                         ForEach(WatchMetric.allCases) { Text($0.title).tag($0) }
                     }
                     .labelsHidden()
 
-                    chart
-
-                    if let latest = points.last {
-                        Text("Latest: \(metric.format(latest.value))")
+                    if points.count < 2 {
+                        Text("Not enough \(metric.title.lowercased()) data yet. Try another metric or finish more walks.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, minHeight: 80)
+                    } else {
+                        chart
+
+                        if let latest = points.last {
+                            Text("Latest: \(metric.format(latest.value))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

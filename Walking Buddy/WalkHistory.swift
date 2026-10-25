@@ -15,6 +15,7 @@ struct WalkRecord: Codable, Identifiable {
     var duration: TimeInterval      // seconds
     var steps: Int
     var distance: Double            // metres
+    var flights: Double?            // flights climbed (optional for back-compatibility)
     var risk: Double                // average break risk, 0...1
     var peakRisk: Double            // highest break risk reached, 0...1
     var alerts: Int                 // break alerts raised during the walk
@@ -66,8 +67,8 @@ struct WalkRecorder {
         self.steadinessCV.add(steadinessCV)
     }
 
-    func finish(duration: TimeInterval, steps: Int, distance: Double) -> WalkRecord {
-        WalkRecord(start: start, duration: duration, steps: steps, distance: distance,
+    func finish(duration: TimeInterval, steps: Int, distance: Double, flights: Double? = nil) -> WalkRecord {
+        WalkRecord(start: start, duration: duration, steps: steps, distance: distance, flights: flights,
                    risk: risk.value ?? 0, peakRisk: peakRisk, alerts: alerts, device: Self.deviceName,
                    speed: speed.value, cadence: cadence.value, steadiness: steadiness.value,
                    asymmetry: asymmetry.value, doubleSupport: doubleSupport.value, heartRate: heartRate.value,
@@ -129,12 +130,24 @@ final class WalkHistory: NSObject, ObservableObject {
 
     // MARK: - Live cross-device sync
 
-    /// Live Watch-only readings streamed to the iPhone during a walk (the values an
-    /// iPhone can't measure on its own). Sent latest-wins over WatchConnectivity.
+    /// Live readings streamed from the Apple Watch to the iPhone during a walk. Heart
+    /// rate and active energy are values the iPhone can't measure on its own; the rest
+    /// let a watch-started walk use the Watch's sensors as the source of truth on the
+    /// phone too. All optional, so older/newer payloads decode cleanly (missing = nil).
+    /// Sent latest-wins over WatchConnectivity.
     nonisolated struct LiveMetrics: Codable {
         var heartRate: Double?           // bpm
         var heartRateFraction: Double?   // 0...1 of max HR
         var activeEnergyKcal: Double?    // kcal
+        var distance: Double?            // metres
+        var steps: Int?
+        var speed: Double?               // m/s
+        var cadence: Double?             // steps/s
+        var flights: Double?
+        var steadiness: Double?          // 0...1
+        var asymmetry: Double?           // 0...1
+        var doubleSupport: Double?       // 0...1
+        var stepLength: Double?          // metres
         var timestamp: Date = Date()
     }
 
@@ -151,7 +164,11 @@ final class WalkHistory: NSObject, ObservableObject {
         WCSession.isSupported() && WCSession.default.activationState == .activated && WCSession.default.isReachable
     }
 
-    /// iPhone-side: true when a paired Apple Watch has the app installed.
+    /// iPhone-side: true when **this iPhone's own directly-paired** Apple Watch has the
+    /// app installed. `WCSession` only ever forms a session with the iPhone's companion
+    /// watch, so a Family Setup watch (one managed here for a relative who has no iPhone)
+    /// is excluded by design — it never pairs over WatchConnectivity, so sync can't reach
+    /// it. `isPaired` reflects the companion watch, not family-managed watches.
     var hasPairedWatchApp: Bool {
         #if os(iOS)
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return false }
@@ -194,11 +211,9 @@ final class WalkHistory: NSObject, ObservableObject {
 
     func add(_ walk: WalkRecord) {
         insert(walk)
-        #if os(watchOS)
-        if let data = try? JSONEncoder().encode(walk) {
-            WCSession.default.transferUserInfo(["walk": data])
-        }
-        #endif
+        // Share recent history with the counterpart device so both sides converge,
+        // no matter which device recorded the walk or how it was started.
+        syncHistory()
     }
 
     func clear() {
@@ -219,7 +234,7 @@ final class WalkHistory: NSObject, ObservableObject {
     }
 }
 
-// MARK: - Apple Watch → iPhone sync
+// MARK: - Cross-device history sync (iPhone ↔ Apple Watch)
 
 extension WalkHistory: WCSessionDelegate {
 
@@ -245,6 +260,21 @@ extension WalkHistory: WCSessionDelegate {
         }
     }
 
+    /// Shares a window of recent walks with the counterpart device so both histories —
+    /// and their trends — converge, whichever device recorded each walk and whether or
+    /// not the walk was started from the other device. Delivered via `transferUserInfo`,
+    /// which queues for background delivery, so missed walks catch up on next launch.
+    /// Walks dedupe by id on receipt, so re-sending is harmless. On the iPhone this is a
+    /// no-op without a paired watch app, so nothing is sent when the user has no watch.
+    func syncHistory() {
+        #if os(iOS)
+        guard hasPairedWatchApp else { return }
+        #endif
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated,
+              let data = try? JSONEncoder().encode(Array(walks.suffix(30))) else { return }
+        WCSession.default.transferUserInfo(["walks": data])
+    }
+
     /// Streams the Watch's live heart-rate / energy to the iPhone. Uses application
     /// context (latest-wins, delivered even in the background) plus an immediate
     /// message when the iPhone is reachable for low latency.
@@ -259,12 +289,23 @@ extension WalkHistory: WCSessionDelegate {
 
     // MARK: Receiving
 
-    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        // Once the link is up, share recent history both ways so past walks converge.
+        Task { @MainActor in self.syncHistory() }
+    }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if let data = userInfo["walk"] as? Data {
             Task { @MainActor in
                 if let walk = try? JSONDecoder().decode(WalkRecord.self, from: data) { self.insert(walk) }
+            }
+        }
+        // iPhone → watch batch: a window of recent walks to keep trends in sync.
+        if let data = userInfo["walks"] as? Data {
+            Task { @MainActor in
+                if let walks = try? JSONDecoder().decode([WalkRecord].self, from: data) {
+                    walks.forEach { self.insert($0) }
+                }
             }
         }
         handlePayload(userInfo)

@@ -54,19 +54,28 @@ struct ContentView: View {
                 if healthManager.notificationsDenied { notificationsBanner }
                 if healthManager.isTracking && healthManager.locationNeedsAlways { locationBanner }
                 riskHero
-                metricsGrid
                 controlButton
+                metricsGrid
                 watchSyncButton
+                healthAccessButton
             }
             .padding(20)
             .padding(.bottom, 12)
         }
         .background(Theme.background.ignoresSafeArea())
         .sheet(isPresented: $showingRiskInfo) {
-            BreakRiskInfoView(heartRateActive: healthManager.isWatchSynced)
+            // "Active" when a Watch is connected (paired + app installed) or already
+            // streaming live — either way heart rate is part of the walk's score.
+            BreakRiskInfoView(heartRateActive: healthManager.isWatchSynced || healthManager.hasPairedWatch)
         }
         .sheet(isPresented: $showingWatchConnect) {
             WatchConnectView()
+        }
+        .alert("Manage Health Access", isPresented: $healthManager.healthAccessNeedsSettings) {
+            Button("Open Health App") { openHealthApp() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Walking Buddy has already requested Health access, so iOS won\u{2019}t show the prompt again here. If any walk data is missing, re-enable it in the Health app \u{2192} Sharing \u{2192} Apps \u{2192} Walking Buddy.")
         }
         .confirmationDialog("Do you have your Apple Watch with you?", isPresented: $showingWatchSyncPrompt, titleVisibility: .visible) {
             Button("Yes \u{2014} start on both") { healthManager.startWithWatch() }
@@ -130,6 +139,7 @@ struct ContentView: View {
             }
             Spacer()
             Button {
+                healthManager.refreshWatchAvailability()
                 showingRiskInfo = true
             } label: {
                 Image(systemName: "info.circle")
@@ -152,6 +162,8 @@ struct ContentView: View {
             )
             .frame(width: 200, height: 200)
 
+            elapsedTime
+
             Text(healthManager.monitoringMessage)
                 .font(.footnote)
                 .multilineTextAlignment(.center)
@@ -165,6 +177,25 @@ struct ContentView: View {
         .shadow(color: Theme.shadow, radius: 12, y: 6)
     }
 
+    /// Prominent elapsed-time readout shown under the Break Risk ring. Tinted by
+    /// the same green/orange/red scale as the ring using the duration sub-score.
+    private var elapsedTime: some View {
+        let durationRisk = healthManager.metricRisks["duration"]
+        let tint = durationRisk.map { Theme.riskColor($0) } ?? .primary
+        return HStack(spacing: 8) {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(healthManager.elapsedTimeStatus)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+            Text("elapsed")
+                .font(.subheadline).bold()
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var metricsGrid: some View {
         let risks = healthManager.metricRisks
         return VStack(alignment: .leading, spacing: 8) {
@@ -174,7 +205,6 @@ struct ContentView: View {
                 MetricCard(icon: "figure.walk", label: "Steps", value: healthManager.stepsStatus)
                 MetricCard(icon: "location.fill", label: "Distance", value: healthManager.distanceStatus)
                 MetricCard(icon: "figure.stairs", label: "Flights", value: healthManager.flightsStatus, risk: risks["flights"])
-                MetricCard(icon: "clock.fill", label: "Elapsed Time", value: healthManager.elapsedTimeStatus, risk: risks["duration"])
                 MetricCard(icon: "waveform.path.ecg", label: "Steadiness", value: healthManager.steadinessStatus, risk: risks["steadiness"])
                 MetricCard(icon: "arrow.left.and.right", label: "Asymmetry", value: healthManager.asymmetryStatus, risk: risks["asymmetry"])
                 MetricCard(icon: "figure.stand", label: "Double Support", value: healthManager.doubleSupportStatus, risk: risks["doubleSupport"])
@@ -232,6 +262,32 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(Theme.card, in: Capsule())
+        }
+    }
+
+    /// Lets the user re-check or re-enable Health access anytime, so the first-run prompt
+    /// isn't the only chance to grant it.
+    private var healthAccessButton: some View {
+        Button {
+            healthManager.manageHealthAccess()
+        } label: {
+            Label("Health Access", systemImage: "heart.text.square")
+                .font(.subheadline).bold()
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Theme.card, in: Capsule())
+        }
+    }
+
+    /// Opens the Health app so the user can re-enable Walking Buddy's categories, falling
+    /// back to the app's Settings page if the Health app can't be opened directly.
+    private func openHealthApp() {
+        guard let url = URL(string: "x-apple-health://") else { return }
+        UIApplication.shared.open(url) { success in
+            if !success, let settings = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settings)
+            }
         }
     }
 
@@ -436,6 +492,8 @@ struct BreakRiskInfoView: View {
     var heartRateActive: Bool = false
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var calibration = SensorCalibration.shared
+    @State private var confirmingCalibrationReset = false
     private let model = BreakRiskModel()
 
     private var breakPercent: Int { Int((model.breakThreshold * 100).rounded()) }
@@ -450,6 +508,7 @@ struct BreakRiskInfoView: View {
 
                     equationCard
                     syncStatusCard
+                    calibrationCard
                     legendCard
                     metricsCard
 
@@ -466,6 +525,11 @@ struct BreakRiskInfoView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .confirmationDialog("Reset Apple Watch calibration?", isPresented: $confirmingCalibrationReset, titleVisibility: .visible) {
+                Button("Reset calibration", role: .destructive) { calibration.reset() }
+            } message: {
+                Text("Walking Buddy will forget how your iPhone differs from your Apple Watch and relearn it over your next few shared walks. Your walk history isn\u{2019}t affected.")
             }
         }
     }
@@ -497,12 +561,50 @@ struct BreakRiskInfoView: View {
                 Text(heartRateActive ? "Apple Watch connected" : "No Apple Watch sync")
                     .font(.subheadline).bold()
                 Text(heartRateActive
-                     ? "Heart rate is included in your Break Risk score."
+                     ? "Heart rate is included in your Break Risk score while you walk with your Apple Watch."
                      : "Heart rate is excluded — your score uses the remaining signals. Sync an Apple Watch to include it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var calibrationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Apple Watch calibration", systemImage: "wand.and.stars")
+                .font(.headline)
+            if calibration.isActive {
+                Text("Walking Buddy has tuned this iPhone\u{2019}s sensors toward your Apple Watch from your shared walks, so iPhone-only walks read more like the Watch.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                ForEach(SensorCalibration.Metric.allCases, id: \.self) { metric in
+                    if let adjustment = calibration.adjustmentDescription(metric) {
+                        HStack {
+                            Text(metric.displayName).font(.subheadline)
+                            Spacer()
+                            Text(adjustment)
+                                .font(.caption).bold()
+                                .foregroundStyle(Theme.brandTeal)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Theme.brandGreen.opacity(0.14), in: Capsule())
+                        }
+                    }
+                }
+                Button("Reset calibration", role: .destructive) { confirmingCalibrationReset = true }
+                    .font(.footnote)
+                    .padding(.top, 2)
+                Text("Clears what Walking Buddy has learned and returns the iPhone to its own raw readings. Your walk history is kept, and it relearns over your next few \u{201C}start on both\u{201D} walks.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Take a few walks with your Apple Watch (\u{201C}start on both\u{201D}) and Walking Buddy will learn how this iPhone\u{2019}s sensors differ from the Watch, then adjust iPhone-only walks to match \u{2014} usually within 3\u{2013}5 walks.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

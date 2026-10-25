@@ -76,6 +76,16 @@ final class HealthKitManager: NSObject, ObservableObject {
     /// of the break-risk equation.
     @Published var isWatchSynced = false
 
+    /// True when the current walk was started with the Apple Watch (either from the
+    /// iPhone's "start on both" or started on the watch). While true, the Watch's
+    /// streamed readings override the iPhone's own pedometer/gait on the phone.
+    private var startedWithWatch = false
+
+    /// Set when the user taps "Health Access" but the system won't show the permission
+    /// sheet again (they already answered it once). The UI uses this to guide them to
+    /// re-enable access in the Health app, since iOS can't re-prompt or deep-link there.
+    @Published var healthAccessNeedsSettings = false
+
     /// Placeholder shown for Watch-only values when no Watch is syncing.
     static let requiresWatchText = "Requires Apple Watch Sync"
 
@@ -97,6 +107,8 @@ final class HealthKitManager: NSObject, ObservableObject {
         let history = WalkHistory.shared
         history.onRemoteStart = { [weak self] in
             guard let self, !self.isTracking else { return }
+            // A remote start is driven by the Apple Watch, so its readings win.
+            self.startedWithWatch = true
             self.requestAuthorizationAndStart(fromRemote: true)
         }
         history.onRemoteStop = { [weak self] in
@@ -218,6 +230,36 @@ final class HealthKitManager: NSObject, ObservableObject {
     /// Holds an `Activity<WalkActivityAttributes>` while a walk is running.
     /// Stored as `Any?` so the property doesn't need availability annotation.
     private var liveActivity: Any?
+    /// The phone's own *raw* (uncalibrated) sensor readings. Kept so calibration can
+    /// always compare raw phone values against a reference (Apple Watch or Apple
+    /// Health) without feeding corrected values back into the learner.
+    private var phoneRawSpeed: Double?
+    private var phoneRawCadence: Double?
+    private var phoneRawDistance: Double?
+    private var phoneRawStepLength: Double?
+    private var phoneRawSteadiness: Double?
+    /// Throttle for comparing live readings against Apple Health's latest values.
+    private var lastHealthCalibration = Date.distantPast
+    private let healthCalibrationInterval: TimeInterval = 45
+    /// Calibration source priority, applied once *per walk* (not per sample) so the
+    /// phone eases toward the reference over several walks — roughly matched by the
+    /// 3rd–5th walk. Priority order:
+    ///   1. Same-walk iPhone-vs-Apple-Watch pairing (strongest) — the primary signal.
+    ///   2. Cross-walk: typical iPhone-only vs Watch-only values across 3+ walks each.
+    ///   3. Apple Health latest values at time of use (lightest).
+    /// Steadiness is special-cased to a strong weight for every source, since our
+    /// instant-steadiness estimate is uncertain (Apple Health counts equally there).
+    private static let watchCalibrationWeight = 0.5
+    private static let crossWalkCalibrationWeight = 0.2
+    private static let healthCalibrationWeight = 0.12
+    private static let steadinessCalibrationWeight = 0.5
+    /// Minimum paired readings within a walk before it updates the calibration.
+    private let calibrationMinSamples = 3
+    /// Minimum walks of each kind (iPhone / Watch) before cross-walk calibration runs.
+    private let crossWalkMinimumWalks = 3
+    /// Per-metric running sums of (phone, reference) readings for the current walk,
+    /// committed to ``SensorCalibration`` as a single EMA step when the walk ends.
+    private var calibrationAcc: [SensorCalibration.Metric: (phoneSum: Double, refSum: Double, count: Int)] = [:]
     #endif
 
     // MARK: - watchOS-only workout state
@@ -252,6 +294,10 @@ final class HealthKitManager: NSObject, ObservableObject {
         // Tell the other device to stop too, unless this stop was itself remote-driven.
         if !fromRemote { WalkHistory.shared.sendCommand("stop") }
         let saved = saveWalk()
+        #if os(iOS)
+        // Fold this walk's background phone-vs-reference readings into the calibration.
+        commitCalibration()
+        #endif
         isTracking = false
         isPaused = false
         triggersAlert = false
@@ -347,13 +393,20 @@ final class HealthKitManager: NSObject, ObservableObject {
         lastFatigueAlert = nil
         isWatchSynced = false
         lastWatchMetricsDate = .distantPast
+        startedWithWatch = false
     }
 
     /// Stores the finished walk in History. Accidental starts (hardly any walking)
     /// and walks shorter than ``minimumWalkDurationForHistory`` are ignored.
     private func saveWalk() -> Bool {
         guard isTracking, hasWalkedEnough, currentElapsed >= minimumWalkDurationForHistory else { return false }
-        WalkHistory.shared.add(recorder.finish(duration: currentElapsed, steps: latestStepCount, distance: latestDistance))
+        #if os(iOS)
+        // A walk started with the Apple Watch is owned by the Watch — it records the
+        // canonical entry (with the Watch's values) and syncs it here, so the iPhone
+        // doesn't save a duplicate of the same walk. Reported as saved either way.
+        if startedWithWatch { return true }
+        #endif
+        WalkHistory.shared.add(recorder.finish(duration: currentElapsed, steps: latestStepCount, distance: latestDistance, flights: latestFlights))
         return true
     }
 
@@ -381,6 +434,9 @@ final class HealthKitManager: NSObject, ObservableObject {
         updateBreakRisk()
         checkFatigueTrend()
         sampleWalk()
+        #if os(iOS)
+        calibrateAgainstHealthIfDue()
+        #endif
     }
 
     /// iPhone-side: if the Watch stops sending live metrics, drop the sync so heart
@@ -667,6 +723,14 @@ extension HealthKitManager {
         currentPaceStatus = "Waiting for Data"
         cadenceStatus = "Waiting for Data"
 
+        phoneRawSpeed = nil
+        phoneRawCadence = nil
+        phoneRawDistance = nil
+        phoneRawStepLength = nil
+        phoneRawSteadiness = nil
+        lastHealthCalibration = .distantPast
+        calibrationAcc = [:]
+
         refreshGaitBaseline()
         startBackgroundLocation()
         observeForegroundReturn()
@@ -718,7 +782,22 @@ extension HealthKitManager {
             guard let self else { return }
 
             self.latestStepVariability = metrics.stepTimeVariability
-            if let steadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness) {
+
+            // Capture the phone's own raw estimates first (kept for calibration even
+            // when the Watch is driving the display).
+            let rawSteadiness = self.calibratedSteadiness(variability: metrics.stepTimeVariability, generic: metrics.steadiness)
+            if let rawSteadiness { self.phoneRawSteadiness = rawSteadiness }
+            if let cadence = metrics.cadence { self.phoneRawCadence = cadence }
+            if let speed = self.phoneRawSpeed, let cadence = self.phoneRawCadence, cadence > 0 {
+                self.phoneRawStepLength = speed / cadence
+            }
+
+            // During a watch-started walk the Watch's readings win — the raw values
+            // above feed calibration, but we don't display the phone's own estimates.
+            guard !self.watchOwnsLiveMetrics else { return }
+
+            if let rawSteadiness {
+                let steadiness = min(max(SensorCalibration.shared.corrected(.steadiness, rawSteadiness), 0), 1)
                 self.latestWalkingSteadiness = steadiness
                 self.steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness))
                     ?? "\(Int(steadiness * 100))%"
@@ -734,14 +813,14 @@ extension HealthKitManager {
                     ?? "\(Int(doubleSupport * 100))%"
             }
             if let cadence = metrics.cadence {
-                self.latestCadence = cadence
-                self.cadenceStatus = "\(Int(cadence * 60)) steps/min"
-                // Live step length = speed / cadence when both are known.
-                if let speed = self.latestWalkingSpeed, cadence > 0 {
-                    let length = speed / cadence
-                    self.latestStepLength = length
-                    self.stepLengthStatus = Self.metersString(length)
-                }
+                let correctedCadence = SensorCalibration.shared.corrected(.cadence, cadence)
+                self.latestCadence = correctedCadence
+                self.cadenceStatus = "\(Int(correctedCadence * 60)) steps/min"
+            }
+            if let rawStepLength = self.phoneRawStepLength {
+                let length = SensorCalibration.shared.corrected(.stepLength, rawStepLength)
+                self.latestStepLength = length
+                self.stepLengthStatus = Self.metersString(length)
             }
 
             self.updateBreakRisk()
@@ -800,6 +879,24 @@ extension HealthKitManager {
         }
     }
 
+    /// User-initiated: re-checks Health access any time, so it isn't a one-time prompt.
+    /// If the system can still show the permission sheet, it presents it; otherwise (the
+    /// user already answered) it flags the UI to guide them to re-enable it in the Health
+    /// app, since iOS won't re-prompt and offers no deep link to the toggle.
+    func manageHealthAccess() {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        healthStore.getRequestStatusForAuthorization(toShare: [HKQuantityType.workoutType()], read: iOSReadTypes()) { [weak self] status, _ in
+            DispatchQueue.main.async {
+                if status == .shouldRequest {
+                    self?.healthAccessNeedsSettings = false
+                    self?.requestHealthAuthorization { self?.refreshGaitBaseline() }
+                } else {
+                    self?.healthAccessNeedsSettings = true
+                }
+            }
+        }
+    }
+
     // MARK: - Start options (with / without Apple Watch)
 
     /// Start a walk and launch the companion Watch workout so heart rate and energy
@@ -807,6 +904,7 @@ extension HealthKitManager {
     /// launched only after authorization completes, since `startWatchApp` needs the
     /// workout-share grant.
     func startWithWatch() {
+        startedWithWatch = true
         requestNotificationAuthorization()
         requestHealthAuthorization { [weak self] in
             self?.startWatchWorkout()
@@ -817,6 +915,7 @@ extension HealthKitManager {
     /// Start a walk on iPhone only. Watch-only values show the "Requires Apple Watch
     /// Sync" placeholder until (if ever) a Watch connects.
     func startWithoutWatch() {
+        startedWithWatch = false
         heartRateStatus = Self.requiresWatchText
         activeEnergyStatus = Self.requiresWatchText
         requestAuthorizationAndStart()
@@ -839,6 +938,7 @@ extension HealthKitManager {
         guard isTracking, !isPaused else { return }
         lastWatchMetricsDate = Date()
         isWatchSynced = true
+        // Heart rate and active energy are Watch-only, so they always apply.
         if let heartRate = metrics.heartRate {
             latestHeartRate = heartRate
             heartRateStatus = "\(Int(heartRate)) bpm"
@@ -850,7 +950,169 @@ extension HealthKitManager {
             latestActiveEnergyKcal = kcal
             activeEnergyStatus = "\(Int(kcal)) kcal"
         }
+
+        // When the walk was started with the Apple Watch, its sensors are the source
+        // of truth: override the iPhone's own pedometer/gait readings with the Watch's.
+        // (The iPhone's own sensors are suppressed meanwhile — see `watchOwnsLiveMetrics`.)
+        if startedWithWatch {
+            if let distance = metrics.distance {
+                latestDistance = distance
+                distanceStatus = Self.metersString(distance)
+            }
+            if let steps = metrics.steps {
+                latestStepCount = steps
+                stepsStatus = "\(steps)"
+            }
+            if let speed = metrics.speed {
+                latestWalkingSpeed = speed
+                currentPaceStatus = Self.speedString(speed)
+            }
+            if let cadence = metrics.cadence {
+                latestCadence = cadence
+                cadenceStatus = "\(Int(cadence * 60)) steps/min"
+            }
+            if let flights = metrics.flights {
+                latestFlights = flights
+                flightsStatus = "\(Int(flights))"
+            }
+            if let steadiness = metrics.steadiness {
+                latestWalkingSteadiness = steadiness
+                steadinessStatus = Self.percentFormatter.string(from: NSNumber(value: steadiness)) ?? "\(Int(steadiness * 100))%"
+            }
+            if let asymmetry = metrics.asymmetry {
+                latestAsymmetry = asymmetry
+                asymmetryStatus = Self.percentFormatter.string(from: NSNumber(value: asymmetry)) ?? "\(Int(asymmetry * 100))%"
+            }
+            if let doubleSupport = metrics.doubleSupport {
+                latestDoubleSupport = doubleSupport
+                doubleSupportStatus = Self.percentFormatter.string(from: NSNumber(value: doubleSupport)) ?? "\(Int(doubleSupport * 100))%"
+            }
+            if let stepLength = metrics.stepLength {
+                latestStepLength = stepLength
+                stepLengthStatus = Self.metersString(stepLength)
+            }
+
+            // Primary calibration signal: record this walk's phone-vs-Watch pairs in
+            // the background (never shown) and commit them once when the walk ends.
+            accumulateCalibration(.speed, phone: phoneRawSpeed, reference: metrics.speed)
+            accumulateCalibration(.cadence, phone: phoneRawCadence, reference: metrics.cadence)
+            accumulateCalibration(.distance, phone: phoneRawDistance, reference: metrics.distance)
+            accumulateCalibration(.stepLength, phone: phoneRawStepLength, reference: metrics.stepLength)
+            accumulateCalibration(.steadiness, phone: phoneRawSteadiness, reference: metrics.steadiness)
+        }
         updateBreakRisk()
+    }
+
+    /// iPhone-side: true once a watch-started walk is actively streaming, so the
+    /// iPhone's own pedometer and gait estimates stand down and let the Watch's
+    /// readings drive the display and the equation. Falls back to the iPhone's own
+    /// sensors before the first packet and if the Watch sync drops.
+    private var watchOwnsLiveMetrics: Bool {
+        startedWithWatch && isWatchSynced
+    }
+
+    /// Periodically compares the phone's live readings against Apple Health's latest
+    /// values for this person (walking speed, step length, steadiness) and folds the
+    /// difference into the calibration. Health carries the Watch's weight for
+    /// steadiness — our instant-steadiness estimate is uncertain — and a lighter
+    /// weight elsewhere, since the Apple Watch is the primary reference. Skips
+    /// watch-driven stretches so it only ever compares the phone's own estimates.
+    private func calibrateAgainstHealthIfDue() {
+        guard isTracking, !isPaused, isWalking, !watchOwnsLiveMetrics else { return }
+        guard Date().timeIntervalSince(lastHealthCalibration) >= healthCalibrationInterval else { return }
+        lastHealthCalibration = Date()
+
+        if let phone = phoneRawSpeed, phone > 0 {
+            let unit = HKUnit.meter().unitDivided(by: .second())
+            fetchMostRecent(.walkingSpeed, unit: unit) { [weak self] value in
+                guard let self, let value, value > 0 else { return }
+                self.accumulateCalibration(.speed, phone: phone, reference: value)
+            }
+        }
+        if let phone = phoneRawStepLength, phone > 0 {
+            fetchMostRecent(.walkingStepLength, unit: .meter()) { [weak self] value in
+                guard let self, let value, value > 0 else { return }
+                self.accumulateCalibration(.stepLength, phone: phone, reference: value)
+            }
+        }
+        if let phone = phoneRawSteadiness, phone > 0 {
+            fetchMostRecent(.appleWalkingSteadiness, unit: .percent()) { [weak self] value in
+                guard let self, let value, value > 0 else { return }
+                self.accumulateCalibration(.steadiness, phone: phone, reference: value)
+            }
+        }
+    }
+
+    /// Adds one paired (phone, reference) reading for the current walk, if both exist.
+    /// Committed as a single calibration step when the walk ends (see ``commitCalibration``).
+    private func accumulateCalibration(_ metric: SensorCalibration.Metric, phone: Double?, reference: Double?) {
+        guard let phone, let reference, phone > 0, reference > 0 else { return }
+        var acc = calibrationAcc[metric] ?? (phoneSum: 0, refSum: 0, count: 0)
+        acc.phoneSum += phone
+        acc.refSum += reference
+        acc.count += 1
+        calibrationAcc[metric] = acc
+    }
+
+    /// At walk end, folds each metric's walk-average difference into the calibration as
+    /// one EMA step, then runs the lighter cross-walk pass. The reference for this walk
+    /// is the Apple Watch when it was a watch-started walk, otherwise Apple Health; the
+    /// Watch is weighted strongest, Health lightest, steadiness strongly either way.
+    private func commitCalibration() {
+        let base = startedWithWatch ? Self.watchCalibrationWeight : Self.healthCalibrationWeight
+        for (metric, acc) in calibrationAcc where acc.count >= calibrationMinSamples && acc.phoneSum > 0 {
+            let weight = (metric == .steadiness) ? Self.steadinessCalibrationWeight : base
+            SensorCalibration.shared.learn(metric, phone: acc.phoneSum, reference: acc.refSum, weight: weight)
+        }
+        calibrationAcc = [:]
+        calibrateCrossWalk()
+    }
+
+    /// Secondary calibration: compares this person's iPhone-only walks against their
+    /// Apple-Watch-only walks across history (needs 3+ of each) to close any residual
+    /// gap the same-walk pass didn't. As the iPhone converges toward the Watch this
+    /// naturally fades to no change.
+    ///
+    /// Only *comparable* walks are paired — a hard hike vs a gentle stroll differ by
+    /// effort, not sensor bias — judged by context habits (time of day, duration,
+    /// distance, steps, flights). And only the agreeable metrics (speed, cadence) are
+    /// compared here; steadiness / asymmetry / double-support swing too much between
+    /// walks to trust, so they're left to the same-walk and Apple Health passes.
+    private func calibrateCrossWalk() {
+        let walks = WalkHistory.shared.walks
+        let watchWalks = walks.filter { $0.device == "Apple Watch" }
+        let phoneWalks = walks.filter { $0.device != "Apple Watch" }
+        guard watchWalks.count >= crossWalkMinimumWalks, phoneWalks.count >= crossWalkMinimumWalks else { return }
+
+        func near(_ x: Double, _ y: Double, ratio: Double) -> Bool {
+            let hi = max(x, y)
+            return hi <= 0 ? true : min(x, y) / hi >= ratio
+        }
+        func comparable(_ a: WalkRecord, _ b: WalkRecord) -> Bool {
+            let hourA = Calendar.current.component(.hour, from: a.start)
+            let hourB = Calendar.current.component(.hour, from: b.start)
+            return abs(hourA - hourB) <= 3
+                && near(a.duration, b.duration, ratio: 0.7)
+                && near(a.distance, b.distance, ratio: 0.7)
+                && near(Double(a.steps), Double(b.steps), ratio: 0.7)
+                && near((a.flights ?? 0) + 1, (b.flights ?? 0) + 1, ratio: 0.6)
+        }
+        func nudge(_ metric: SensorCalibration.Metric, _ value: (WalkRecord) -> Double?) {
+            var phoneSum = 0.0, watchSum = 0.0, pairs = 0
+            for watch in watchWalks {
+                guard let wv = value(watch), wv > 0 else { continue }
+                for phone in phoneWalks where comparable(watch, phone) {
+                    guard let pv = value(phone), pv > 0 else { continue }
+                    watchSum += wv
+                    phoneSum += pv
+                    pairs += 1
+                }
+            }
+            guard pairs >= crossWalkMinimumWalks, phoneSum > 0 else { return }
+            SensorCalibration.shared.learn(metric, phone: phoneSum, reference: watchSum, weight: Self.crossWalkCalibrationWeight)
+        }
+        nudge(.speed) { $0.speed }
+        nudge(.cadence) { $0.cadence }
     }
 
     private func iOSReadTypes() -> Set<HKObjectType> {
@@ -882,10 +1144,27 @@ extension HealthKitManager {
     }
 
     private func applyPedometer(_ data: CMPedometerData) {
+        // Capture the phone's own raw readings first, so calibration can always compare
+        // raw-phone vs reference (Watch / Health) regardless of what we display.
+        let rawDistance = data.distance?.doubleValue
+        let rawSpeed: Double? = {
+            if let pace = data.currentPace?.doubleValue, pace > 0 { return 1 / pace }
+            return nil
+        }()
+        let rawCadence = data.currentCadence?.doubleValue
+        phoneRawDistance = rawDistance
+        phoneRawSpeed = rawSpeed
+        phoneRawCadence = rawCadence
+
+        // In a watch-started walk the Apple Watch's readings win — keep the raw phone
+        // values above (for calibration) but don't display them.
+        guard !watchOwnsLiveMetrics else { return }
+
         latestStepCount = data.numberOfSteps.intValue
         stepsStatus = "\(latestStepCount)"
 
-        if let distance = data.distance?.doubleValue {
+        if let rawDistance {
+            let distance = SensorCalibration.shared.corrected(.distance, rawDistance)
             latestDistance = distance
             distanceStatus = Self.metersString(distance)
         }
@@ -895,13 +1174,14 @@ extension HealthKitManager {
             flightsStatus = "\(Int(floors))"
         }
 
-        if let pace = data.currentPace?.doubleValue, pace > 0 {
-            let metersPerSecond = 1 / pace
-            latestWalkingSpeed = metersPerSecond
-            currentPaceStatus = Self.speedString(metersPerSecond)
+        if let rawSpeed {
+            let speed = SensorCalibration.shared.corrected(.speed, rawSpeed)
+            latestWalkingSpeed = speed
+            currentPaceStatus = Self.speedString(speed)
         }
 
-        if let cadence = data.currentCadence?.doubleValue {
+        if let rawCadence {
+            let cadence = SensorCalibration.shared.corrected(.cadence, rawCadence)
             latestCadence = cadence
             let stepsPerMinute = cadence * 60
             cadenceStatus = (Self.cadenceFormatter.string(from: NSNumber(value: stepsPerMinute)) ?? "\(Int(stepsPerMinute))") + " steps/min"
@@ -985,6 +1265,81 @@ extension HealthKitManager {
             self.doubleSupportStatus = tired ? "40%" : "28%"
             self.updateBreakRisk()
         }
+    }
+}
+
+// MARK: - Adaptive sensor calibration
+
+/// Learns how the iPhone's own sensors differ from trusted references — the Apple
+/// Watch (primary) and Apple Health — for the *same person*, then nudges the phone's
+/// solo-walk readings toward them. One multiplicative factor per metric, updated by a
+/// weighted exponential moving average and clamped so a single bad sample can't skew
+/// it. Persisted per device in `UserDefaults`. Factors start at 1.0 (no change) until
+/// enough paired readings are seen, so behaviour degrades gracefully.
+final class SensorCalibration: ObservableObject {
+    static let shared = SensorCalibration()
+
+    enum Metric: String, CaseIterable {
+        case speed, cadence, distance, stepLength, steadiness
+
+        var displayName: String {
+            switch self {
+            case .speed: "Walking speed"
+            case .cadence: "Cadence"
+            case .distance: "Distance"
+            case .stepLength: "Step length"
+            case .steadiness: "Steadiness"
+            }
+        }
+    }
+
+    private let defaults = UserDefaults.standard
+    private let key = "wb.sensorCalibration"
+    private let minFactor = 0.5
+    private let maxFactor = 2.0
+    @Published private(set) var factors: [String: Double]
+
+    private init() {
+        factors = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
+    }
+
+    /// True once any metric has been adjusted away from neutral.
+    var isActive: Bool { factors.contains { abs($0.value - 1) > 0.01 } }
+
+    /// A short "+8%" / "−3%" description of a metric's current adjustment, or nil when
+    /// it hasn't meaningfully moved from neutral.
+    func adjustmentDescription(_ metric: Metric) -> String? {
+        let f = factor(for: metric)
+        guard abs(f - 1) > 0.01 else { return nil }
+        let pct = Int(((f - 1) * 100).rounded())
+        return pct > 0 ? "+\(pct)%" : "\(pct)%"
+    }
+
+    /// Clears every learned factor, returning the phone to its own raw readings.
+    func reset() {
+        factors = [:]
+        defaults.removeObject(forKey: key)
+    }
+
+    /// Current correction factor for a metric (1.0 = nothing learned yet).
+    func factor(for metric: Metric) -> Double { factors[metric.rawValue] ?? 1 }
+
+    /// Applies the learned correction to a raw phone reading.
+    func corrected(_ metric: Metric, _ value: Double) -> Double { value * factor(for: metric) }
+
+    /// Folds one paired (phone, reference) reading into a metric's factor. `weight` is
+    /// this sample's EMA weight — how strongly this reference pulls the factor.
+    func learn(_ metric: Metric, phone: Double, reference: Double, weight: Double) {
+        guard phone > 0, reference > 0 else { return }
+        let ratio = min(max(reference / phone, minFactor), maxFactor)
+        // Start neutral (1.0 = no correction) and ease toward the ratio one walk at a
+        // time, so the phone converges gradually over several walks rather than
+        // snapping to a single walk's reading.
+        let current = factors[metric.rawValue] ?? 1
+        let w = min(max(weight, 0), 1)
+        let updated = min(max(current * (1 - w) + ratio * w, minFactor), maxFactor)
+        factors[metric.rawValue] = updated
+        defaults.set(factors, forKey: key)
     }
 }
 
@@ -1117,6 +1472,7 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
                 self.stepLengthStatus = Self.metersString(length)
             }
             self.updateBreakRisk()
+            self.streamLiveMetricsToiPhone()
         }
         gaitAnalyzer.start()
     }
@@ -1144,6 +1500,33 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             DispatchQueue.main.async {
                 self?.updateMaxHeartRateFromAge()
                 completion()
+            }
+        }
+    }
+
+    /// User-initiated: re-checks Health access any time, so it isn't a one-time prompt.
+    /// Re-presents the permission sheet when the system still allows it; otherwise flags
+    /// the UI to guide the user to re-enable access in Settings, since watchOS won't
+    /// re-prompt once the user has answered.
+    func manageHealthAccess() {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        var share: Set<HKSampleType> = [HKQuantityType.workoutType()]
+        if let energy = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) { share.insert(energy) }
+        if let distance = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) { share.insert(distance) }
+        if let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate) { share.insert(heartRate) }
+        var read = Set(share.map { $0 as HKObjectType })
+        if let steps = HKQuantityType.quantityType(forIdentifier: .stepCount) { read.insert(steps) }
+        if let flights = HKQuantityType.quantityType(forIdentifier: .flightsClimbed) { read.insert(flights) }
+        if let dob = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) { read.insert(dob) }
+
+        healthStore.getRequestStatusForAuthorization(toShare: share, read: read) { [weak self] status, _ in
+            DispatchQueue.main.async {
+                if status == .shouldRequest {
+                    self?.healthAccessNeedsSettings = false
+                    self?.requestHealthAuthorization { }
+                } else {
+                    self?.healthAccessNeedsSettings = true
+                }
             }
         }
     }
@@ -1242,12 +1625,25 @@ extension HealthKitManager: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelega
             break
         }
         updateBreakRisk()
+        streamLiveMetricsToiPhone()
+    }
 
-        // Stream the Watch-only readings to the iPhone so both devices match.
+    /// Streams the Watch's live readings to the iPhone so a watch-started walk shows
+    /// and records the Watch's sensor values there too — not just heart rate / energy.
+    private func streamLiveMetricsToiPhone() {
         WalkHistory.shared.sendLiveMetrics(
             WalkHistory.LiveMetrics(heartRate: latestHeartRate,
                                     heartRateFraction: latestHeartRateFraction,
-                                    activeEnergyKcal: latestActiveEnergyKcal)
+                                    activeEnergyKcal: latestActiveEnergyKcal,
+                                    distance: latestDistance,
+                                    steps: latestStepCount,
+                                    speed: latestWalkingSpeed,
+                                    cadence: latestCadence,
+                                    flights: latestFlights,
+                                    steadiness: latestWalkingSteadiness,
+                                    asymmetry: latestAsymmetry,
+                                    doubleSupport: latestDoubleSupport,
+                                    stepLength: latestStepLength)
         )
     }
 

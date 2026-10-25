@@ -27,6 +27,11 @@ struct ContentView: View {
         } message: {
             Text(healthManager.alertMessage)
         }
+        .alert("Health Access", isPresented: $healthManager.healthAccessNeedsSettings) {
+            Button("OK") {}
+        } message: {
+            Text("Health access was already set. If walk data is missing, re-enable it in Settings \u{2192} Privacy & Security \u{2192} Health on your Apple Watch, or from the Health app on your iPhone.")
+        }
     }
 
     private var monitor: some View {
@@ -48,6 +53,10 @@ struct ContentView: View {
                 )
                 .frame(width: 96, height: 96)
 
+                elapsedTime
+
+                controls
+
                 VStack(spacing: 6) {
                     metricRow("Heart Rate", healthManager.heartRateStatus, risk: healthManager.metricRisks["heartRate"])
                     metricRow("Speed", healthManager.currentPaceStatus, risk: healthManager.metricRisks["speed"])
@@ -60,7 +69,6 @@ struct ContentView: View {
                     metricRow("Double Support", healthManager.doubleSupportStatus, risk: healthManager.metricRisks["doubleSupport"])
                     metricRow("Step Length", healthManager.stepLengthStatus, risk: healthManager.metricRisks["stepLength"])
                     metricRow("Energy", healthManager.activeEnergyStatus, risk: healthManager.metricRisks["activeEnergy"])
-                    metricRow("Time", healthManager.elapsedTimeStatus, risk: healthManager.metricRisks["duration"])
 
                     Text("Steadiness, asymmetry, double support & step length are wrist estimates.")
                         .font(.system(size: 9))
@@ -69,44 +77,70 @@ struct ContentView: View {
                         .padding(.top, 2)
                 }
 
-                if healthManager.isPaused {
-                    // After "I'll sit down" the walk is paused — resume or stop.
-                    Button {
-                        healthManager.resumeSession()
-                    } label: {
-                        Label("Resume", systemImage: "play.fill").frame(maxWidth: .infinity)
-                    }
-                    .tint(Self.brandTeal)
-                    Button {
-                        healthManager.stopSession()
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
-                    }
-                    .tint(.red)
-                } else if healthManager.isTracking {
-                    // Mirrors the iPhone: Pause beside Stop while a walk is running.
-                    Button {
-                        healthManager.pauseSession()
-                    } label: {
-                        Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity)
-                    }
-                    .tint(Self.brandTeal)
-                    Button {
-                        healthManager.stopSession()
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
-                    }
-                    .tint(.red)
-                } else {
-                    Button {
-                        healthManager.requestAuthorizationAndStart()
-                    } label: {
-                        Label("Start Walk", systemImage: "figure.walk").frame(maxWidth: .infinity)
-                    }
-                    .tint(Self.brandTeal)
+                Button {
+                    healthManager.manageHealthAccess()
+                } label: {
+                    Label("Health Access", systemImage: "heart.text.square").frame(maxWidth: .infinity)
                 }
+                .tint(.gray)
             }
             .padding(.horizontal, 4)
+        }
+    }
+
+    /// Prominent elapsed-time readout shown under the risk ring, tinted by the same
+    /// scale as the ring using the duration sub-score.
+    private var elapsedTime: some View {
+        let tint = healthManager.metricRisks["duration"].map { Self.riskColor($0) } ?? .primary
+        return HStack(spacing: 5) {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(healthManager.elapsedTimeStatus)
+                .font(.system(.title3, design: .rounded)).bold()
+                .foregroundStyle(tint)
+                .monospacedDigit()
+        }
+    }
+
+    /// Start / pause / resume / stop controls, shown near the top under elapsed time.
+    @ViewBuilder
+    private var controls: some View {
+        if healthManager.isPaused {
+            // After "I'll sit down" the walk is paused — resume or stop.
+            Button {
+                healthManager.resumeSession()
+            } label: {
+                Label("Resume", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            .tint(Self.brandTeal)
+            Button {
+                healthManager.stopSession()
+            } label: {
+                Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+            }
+            .tint(.red)
+        } else if healthManager.isTracking {
+            // Mirrors the iPhone: Pause beside Stop while a walk is running.
+            Button {
+                healthManager.pauseSession()
+            } label: {
+                Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity)
+            }
+            .tint(Self.brandTeal)
+            Button {
+                healthManager.stopSession()
+            } label: {
+                Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+            }
+            .tint(.red)
+        } else {
+            Button {
+                healthManager.requestAuthorizationAndStart()
+            } label: {
+                Label("Start Walk", systemImage: "figure.walk").frame(maxWidth: .infinity)
+            }
+            .tint(Self.brandTeal)
         }
     }
 

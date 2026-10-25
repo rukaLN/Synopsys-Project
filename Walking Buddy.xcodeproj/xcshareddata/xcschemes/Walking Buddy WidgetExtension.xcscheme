@@ -75,12 +75,21 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
+            BlueprintIdentifier = "358140FE3085A1F00085C2EE"
+            BuildableName = "Walking Buddy WidgetExtension.appex"
+            BlueprintName = "Walking Buddy WidgetExtension"
+            ReferencedContainer = "container:Walking Buddy.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
             BlueprintIdentifier = "35AA62F4301B041C0067AFD8"
             BuildableName = "Walking Buddy.app"
             BlueprintName = "Walking Buddy"
             ReferencedContainer = "container:Walking Buddy.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "_XCWidgetKind"
