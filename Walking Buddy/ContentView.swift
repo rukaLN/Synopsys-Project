@@ -504,12 +504,14 @@ struct BreakRiskInfoView: View {
     private let model = BreakRiskModel()
 
     private var breakPercent: Int { Int((model.breakThreshold * 100).rounded()) }
+    private var peakPercent: Int { Int((model.peakBlend * 100).rounded()) }
+    private var averagePercent: Int { Int(((1 - model.peakBlend) * 100).rounded()) }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Walking Buddy blends every available walking signal into one \u{201C}Break Risk\u{201D} score between 0% and 100%. Each signal gets a 0\u{2013}1 sub-score for how far it has drifted from a senior-safe range, then they\u{2019}re combined as a weighted average.")
+                    Text("Walking Buddy blends every available walking signal into one \u{201C}Break Risk\u{201D} score between 0% and 100%. Each signal gets a 0\u{2013}1 sub-score for how far it has drifted from a senior-safe range. The score leans mostly on the single worst signal, topped up by the weighted average of the rest \u{2014} so one serious problem isn\u{2019}t hidden by everything else looking fine.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -545,12 +547,15 @@ struct BreakRiskInfoView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("The equation")
                 .font(.headline)
-            Text("risk = ( \u{03A3} w\u{1D62} \u{00D7} s\u{1D62} ) / ( \u{03A3} w\u{1D62} )")
-                .font(.system(.body, design: .monospaced)).bold()
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 10)
-                .background(Theme.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text("w\u{1D62} is each metric\u{2019}s weight (how much it matters) and s\u{1D62} is its 0\u{2013}1 sub-score. A break is recommended once the risk reaches \(breakPercent)%.")
+            VStack(spacing: 6) {
+                Text("avg = ( \u{03A3} w\u{1D62} \u{00D7} s\u{1D62} ) / ( \u{03A3} w\u{1D62} )")
+                Text("risk = \(String(format: "%.2f", model.peakBlend)) \u{00D7} worst + \(String(format: "%.2f", 1 - model.peakBlend)) \u{00D7} avg")
+            }
+            .font(.system(.footnote, design: .monospaced)).bold()
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 10)
+            .background(Theme.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text("w\u{1D62} is each metric\u{2019}s weight and s\u{1D62} is its 0\u{2013}1 sub-score, so \u{201C}avg\u{201D} is the weighted average and \u{201C}worst\u{201D} is the highest single sub-score. Leaning \(peakPercent)% on the worst signal and \(averagePercent)% on the average lets one serious reading raise the score instead of being averaged away. A break is recommended once the risk reaches \(breakPercent)%.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

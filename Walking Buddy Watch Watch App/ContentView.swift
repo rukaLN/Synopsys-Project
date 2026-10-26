@@ -226,11 +226,11 @@ struct WatchRiskInfoView: View {
                     .font(.headline)
                     .foregroundStyle(Self.brandGreen)
 
-                Text("A weighted blend of your walking signals, 0\u{2013}100%. A break is suggested at \(breakPercent)%.")
+                Text("A blend of your walking signals, 0\u{2013}100%. It leans on the single worst signal so one serious reading isn\u{2019}t averaged away. A break is suggested at \(breakPercent)%.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Text("risk = (\u{03A3} w\u{1D62}\u{00B7}s\u{1D62}) / (\u{03A3} w\u{1D62})")
+                Text("risk = \(String(format: "%.2f", model.peakBlend))\u{00B7}worst + \(String(format: "%.2f", 1 - model.peakBlend))\u{00B7}avg")
                     .font(.system(.caption2, design: .monospaced)).bold()
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)

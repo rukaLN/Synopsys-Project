@@ -32,6 +32,11 @@ struct BreakRiskModel {
     var exertionEnergy = 150.0        // kcal of active energy before exertion starts counting
     var energyCeiling = 450.0         // kcal at which exertion is fully "risky"
 
+    /// How much the composite leans on the single worst signal vs. the weighted
+    /// average (0 = pure average, 1 = pure worst-signal). Lets one severe reading lift
+    /// the overall score into red instead of being averaged away.
+    var peakBlend = 0.55
+
     /// Composite score at or above which we recommend a break.
     var breakThreshold = 0.40
 
@@ -141,7 +146,14 @@ struct BreakRiskModel {
                    input.activeEnergy.map { excess(value: $0, normal: exertionEnergy, ceiling: energyCeiling) },
                    reason: "you have burned a lot of energy")
 
-        let score = totalWeight > 0 ? weightedSum / totalWeight : 0
+        // A plain weighted average is dragged down by the many signals that are
+        // legitimately near zero (no stairs, low energy, normal speed, early in the
+        // walk), so it tops out around 50% and never reaches red. Blend the average
+        // with the *worst* single sub-score so one severe signal (or a few moderate
+        // ones) can push the composite into orange/red the way it should.
+        let mean = totalWeight > 0 ? weightedSum / totalWeight : 0
+        let peak = contributions.map(\.score).max() ?? 0
+        let score = min(max(peakBlend * peak + (1 - peakBlend) * mean, 0), 1)
         let needsBreak = input.stepCount >= minimumStepsBeforeAlert && score >= breakThreshold
         return Result(score: score, reasons: reasons, needsBreak: needsBreak, contributions: contributions)
     }

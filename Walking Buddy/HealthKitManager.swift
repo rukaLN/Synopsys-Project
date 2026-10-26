@@ -155,8 +155,10 @@ final class HealthKitManager: NSObject, ObservableObject {
     private let minimumWalkDurationForHistory: TimeInterval = 5 * 60
 
     /// Hold time H: the risk ring must stay at/above the break threshold this long
-    /// continuously to alarm.
-    private let sustainedHoldDuration: TimeInterval = 3
+    /// continuously to alarm. Lengthened for the peak-blended score — a single signal
+    /// can now lift the composite quickly, so we require it to genuinely persist (not a
+    /// momentary spike) before alerting.
+    private let sustainedHoldDuration: TimeInterval = 6
     /// First instant the composite risk (the ring) crossed the break threshold
     /// (reset when it drops back below). Drives the sustained-dwell equation.
     private var riskTripStart: Date?
