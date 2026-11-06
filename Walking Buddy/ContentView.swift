@@ -426,6 +426,17 @@ struct RiskRing: View {
     let fraction: Double
     let percentText: String
     let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Plain-language severity so the meaning never depends on color alone — also read
+    /// aloud by VoiceOver.
+    private var level: String {
+        switch fraction {
+        case ..<0.4: "low"
+        case ..<0.7: "elevated"
+        default: "high"
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -435,7 +446,7 @@ struct RiskRing: View {
                 .trim(from: 0, to: max(0, min(fraction, 1)))
                 .stroke(color, style: StrokeStyle(lineWidth: 18, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.4), value: fraction)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: fraction)
             VStack(spacing: 2) {
                 Text(percentText)
                     .font(.system(size: 48, weight: .bold, design: .rounded))
@@ -445,6 +456,9 @@ struct RiskRing: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Break risk")
+        .accessibilityValue("\(percentText), \(level)")
     }
 }
 
@@ -461,6 +475,14 @@ struct MetricCard: View {
     private var valueColor: Color {
         guard let risk else { return .primary }
         return Theme.riskColor(risk)
+    }
+
+    /// Reads "<label>: <value>, <severity>" to VoiceOver, so the risk tint (color) is
+    /// also conveyed in words rather than by color alone.
+    private var accessibleValue: String {
+        guard let risk else { return value }
+        let level = risk < 0.4 ? "normal" : (risk < 0.7 ? "elevated" : "high")
+        return "\(value), \(level)"
     }
 
     var body: some View {
@@ -486,6 +508,9 @@ struct MetricCard: View {
         .padding(16)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Theme.shadow, radius: 8, y: 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(accessibleValue)
     }
 }
 

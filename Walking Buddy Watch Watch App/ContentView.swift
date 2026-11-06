@@ -152,7 +152,8 @@ struct ContentView: View {
     }
 
     private func metricRow(_ label: String, _ value: String, risk: Double? = nil) -> some View {
-        HStack {
+        let level = risk.map { $0 < 0.4 ? "normal" : ($0 < 0.7 ? "elevated" : "high") }
+        return HStack {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -162,6 +163,9 @@ struct ContentView: View {
                 .bold()
                 .foregroundStyle(risk.map { Self.riskColor($0) } ?? .primary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(level.map { "\(value), \($0)" } ?? value)
     }
 
     private var riskValue: Int {
@@ -189,6 +193,15 @@ struct WatchRiskRing: View {
     let fraction: Double
     let percentText: String
     let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var level: String {
+        switch fraction {
+        case ..<0.4: "low"
+        case ..<0.7: "elevated"
+        default: "high"
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -198,7 +211,7 @@ struct WatchRiskRing: View {
                 .trim(from: 0, to: max(0, min(fraction, 1)))
                 .stroke(color, style: StrokeStyle(lineWidth: 9, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.4), value: fraction)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: fraction)
             VStack(spacing: 0) {
                 Text(percentText)
                     .font(.system(.title3, design: .rounded)).bold()
@@ -208,6 +221,9 @@ struct WatchRiskRing: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Break risk")
+        .accessibilityValue("\(percentText), \(level)")
     }
 }
 
