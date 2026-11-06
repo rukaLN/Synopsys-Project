@@ -524,6 +524,14 @@ struct BreakRiskInfoView: View {
                     Text("Metrics that aren\u{2019}t available (for example heart rate without a synced Apple Watch) simply drop out of both sums, so the score stays balanced on whichever signals you do have.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    if let privacyURL = URL(string: "https://rukaln.github.io/Synopsys-Project/privacy-policy.html") {
+                        Link("Privacy Policy", destination: privacyURL)
+                            .font(.footnote.bold())
+                            .foregroundStyle(Theme.brandTeal)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 6)
+                    }
                 }
                 .padding(20)
             }
