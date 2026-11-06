@@ -88,14 +88,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		358141183085A1F30085C2EE /* Exceptions for "Walker Buddy Widget" folder in "Walking Buddy WidgetExtension" target */ = {
+		358141183085A1F30085C2EE /* Exceptions for "Walking Buddy Widget" folder in "Walking Buddy WidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 358140FE3085A1F00085C2EE /* Walking Buddy WidgetExtension */;
 		};
-		358141323085A4FD0085C2EE /* Exceptions for "Walker Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */ = {
+		358141323085A4FD0085C2EE /* Exceptions for "Walking Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -126,17 +126,17 @@
 		358141053085A1F00085C2EE /* Walking Buddy Widget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				358141183085A1F30085C2EE /* Exceptions for "Walker Buddy Widget" folder in "Walking Buddy WidgetExtension" target */,
+				358141183085A1F30085C2EE /* Exceptions for "Walking Buddy Widget" folder in "Walking Buddy WidgetExtension" target */,
 			);
-			path = "Walker Buddy Widget";
+			path = "Walking Buddy Widget";
 			sourceTree = "<group>";
 		};
 		358141253085A4FA0085C2EE /* Walking Buddy iOS Widget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				358141323085A4FD0085C2EE /* Exceptions for "Walker Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */,
+				358141323085A4FD0085C2EE /* Exceptions for "Walking Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */,
 			);
-			path = "Walker Buddy iOS Widget";
+			path = "Walking Buddy iOS Widget";
 			sourceTree = "<group>";
 		};
 		35AA62F7301B041C0067AFD8 /* Walking Buddy */ = {
@@ -458,7 +458,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy WidgetExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy Widget/Info.plist";
@@ -493,7 +493,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy WidgetExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy Widget/Info.plist";
@@ -527,8 +527,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy iOS WidgetExtension.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy iOS Widget/Info.plist";
@@ -543,6 +544,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "Walking-Buddy.Walking-Buddy.Walking-Buddy-iOS-Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -559,8 +561,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy iOS WidgetExtension.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy iOS Widget/Info.plist";
@@ -575,6 +578,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "Walking-Buddy.Walking-Buddy.Walking-Buddy-iOS-Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -714,7 +718,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy/Walking Buddy.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -760,7 +764,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy/Walking Buddy.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -806,7 +810,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy Watch Watch App/Walking Buddy Watch Watch App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -845,7 +849,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Walking Buddy Watch Watch App/Walking Buddy Watch Watch App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
