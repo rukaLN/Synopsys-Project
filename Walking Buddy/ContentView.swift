@@ -82,7 +82,7 @@ struct ContentView: View {
             Button("Open Health App") { openHealthApp() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Walking Buddy has already requested Health access, so iOS won\u{2019}t show the prompt again here. If any walk data is missing, re-enable it in the Health app \u{2192} Sharing \u{2192} Apps \u{2192} Walking Buddy.")
+            Text("Walker Buddy has already requested Health access, so iOS won\u{2019}t show the prompt again here. If any walk data is missing, re-enable it in the Health app \u{2192} Sharing \u{2192} Apps \u{2192} Walker Buddy.")
         }
         .confirmationDialog("Do you have your Apple Watch with you?", isPresented: $showingWatchSyncPrompt, titleVisibility: .visible) {
             Button("Yes \u{2014} start on both") { healthManager.startWithWatch() }
@@ -123,7 +123,7 @@ struct ContentView: View {
         Button {
             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
         } label: {
-            Label("Set Location to \u{201C}Always\u{201D} so Walking Buddy keeps monitoring during a call or with the screen off. Tap to fix.",
+            Label("Set Location to \u{201C}Always\u{201D} so Walker Buddy keeps monitoring during a call or with the screen off. Tap to fix.",
                   systemImage: "location.slash.fill")
                 .font(.footnote).bold()
                 .multilineTextAlignment(.leading)
@@ -138,7 +138,7 @@ struct ContentView: View {
         HStack(spacing: 14) {
             WalkingBuddyLogo(size: 52)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Walking Buddy")
+                Text("Walker Buddy")
                     .font(.system(.title2, design: .rounded)).bold()
                 Text("Mobility & fatigue monitor")
                     .font(.subheadline)
@@ -287,7 +287,7 @@ struct ContentView: View {
         }
     }
 
-    /// Opens the Health app so the user can re-enable Walking Buddy's categories, falling
+    /// Opens the Health app so the user can re-enable Walker Buddy's categories, falling
     /// back to the app's Settings page if the Health app can't be opened directly.
     private func openHealthApp() {
         guard let url = URL(string: "x-apple-health://") else { return }
@@ -358,7 +358,7 @@ enum Theme {
 
 // MARK: - Logo
 
-/// Reusable Walking Buddy mark: two figures striding together (a person and a
+/// Reusable Walker Buddy mark: two figures striding together (a person and a
 /// smaller amber "buddy") with a heart, on the brand gradient badge.
 struct WalkingBuddyLogo: View {
     var size: CGFloat = 52
@@ -511,7 +511,7 @@ struct BreakRiskInfoView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Walking Buddy blends every available walking signal into one \u{201C}Break Risk\u{201D} score between 0% and 100%. Each signal gets a 0\u{2013}1 sub-score for how far it has drifted from a senior-safe range. The score leans mostly on the single worst signal, topped up by the weighted average of the rest \u{2014} so one serious problem isn\u{2019}t hidden by everything else looking fine.")
+                    Text("Walker Buddy blends every available walking signal into one \u{201C}Break Risk\u{201D} score between 0% and 100%. Each signal gets a 0\u{2013}1 sub-score for how far it has drifted from a senior-safe range. The score leans mostly on the single worst signal, topped up by the weighted average of the rest \u{2014} so one serious problem isn\u{2019}t hidden by everything else looking fine.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -546,7 +546,7 @@ struct BreakRiskInfoView: View {
             .confirmationDialog("Reset Apple Watch calibration?", isPresented: $confirmingCalibrationReset, titleVisibility: .visible) {
                 Button("Reset calibration", role: .destructive) { calibration.reset() }
             } message: {
-                Text("Walking Buddy will forget how your iPhone differs from your Apple Watch and relearn it over your next few shared walks. Your walk history isn\u{2019}t affected.")
+                Text("Walker Buddy will forget how your iPhone differs from your Apple Watch and relearn it over your next few shared walks. Your walk history isn\u{2019}t affected.")
             }
         }
     }
@@ -598,7 +598,7 @@ struct BreakRiskInfoView: View {
             Label("Apple Watch calibration", systemImage: "wand.and.stars")
                 .font(.headline)
             if calibration.isActive {
-                Text("Walking Buddy has tuned this iPhone\u{2019}s sensors toward your Apple Watch from your shared walks, so iPhone-only walks read more like the Watch.")
+                Text("Walker Buddy has tuned this iPhone\u{2019}s sensors toward your Apple Watch from your shared walks, so iPhone-only walks read more like the Watch.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 ForEach(SensorCalibration.Metric.allCases, id: \.self) { metric in
@@ -617,11 +617,11 @@ struct BreakRiskInfoView: View {
                 Button("Reset calibration", role: .destructive) { confirmingCalibrationReset = true }
                     .font(.footnote)
                     .padding(.top, 2)
-                Text("Clears what Walking Buddy has learned and returns the iPhone to its own raw readings. Your walk history is kept, and it relearns over your next few \u{201C}start on both\u{201D} walks.")
+                Text("Clears what Walker Buddy has learned and returns the iPhone to its own raw readings. Your walk history is kept, and it relearns over your next few \u{201C}start on both\u{201D} walks.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
-                Text("Take a few walks with your Apple Watch (\u{201C}start on both\u{201D}) and Walking Buddy will learn how this iPhone\u{2019}s sensors differ from the Watch, then adjust iPhone-only walks to match \u{2014} usually within 3\u{2013}5 walks.")
+                Text("Take a few walks with your Apple Watch (\u{201C}start on both\u{201D}) and Walker Buddy will learn how this iPhone\u{2019}s sensors differ from the Watch, then adjust iPhone-only walks to match \u{2014} usually within 3\u{2013}5 walks.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -772,7 +772,7 @@ struct WatchConnectView: View {
     private var title: String {
         switch state {
         case .connected: return "Apple Watch Connected"
-        case .appNotInstalled: return "Add Walking Buddy to your Watch"
+        case .appNotInstalled: return "Add Walker Buddy to your Watch"
         case .noWatch: return "No Apple Watch Found"
         }
     }
@@ -782,9 +782,9 @@ struct WatchConnectView: View {
         case .connected:
             return "You\u{2019}re all set. Heart rate and active energy will sync automatically during your walks, and starting a walk on one device starts it on both."
         case .appNotInstalled:
-            return "Your Apple Watch is paired, but Walking Buddy isn\u{2019}t installed on it yet. Install it to sync heart rate and energy."
+            return "Your Apple Watch is paired, but Walker Buddy isn\u{2019}t installed on it yet. Install it to sync heart rate and energy."
         case .noWatch:
-            return "Walking Buddy works great on its own. Pair an Apple Watch to add live heart rate and active energy."
+            return "Walker Buddy works great on its own. Pair an Apple Watch to add live heart rate and active energy."
         }
     }
 
@@ -794,12 +794,12 @@ struct WatchConnectView: View {
                 .font(.headline)
             if state == .appNotInstalled {
                 step(1, "Open the Apple Watch app on your iPhone.")
-                step(2, "Scroll to \u{201C}Available Apps\u{201D} and tap Install next to Walking Buddy.")
+                step(2, "Scroll to \u{201C}Available Apps\u{201D} and tap Install next to Walker Buddy.")
                 step(3, "Come back here \u{2014} it\u{2019}ll connect automatically.")
             } else {
                 step(1, "Open the Apple Watch app on your iPhone.")
                 step(2, "Follow the steps to pair your Apple Watch.")
-                step(3, "Install Walking Buddy on the Watch, then return here.")
+                step(3, "Install Walker Buddy on the Watch, then return here.")
             }
         }
         .padding(16)

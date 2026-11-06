@@ -1,6 +1,6 @@
 //
 //  WalkActivityAttributes.swift
-//  Walking Buddy
+//  Walker Buddy
 //
 //  Shared Live Activity model. This file MUST be a member of BOTH the main app
 //  target and the "Walking Buddy iOS WidgetExtension" target — the Live Activity
@@ -25,5 +25,5 @@ struct WalkActivityAttributes: ActivityAttributes {
     }
 
     /// Static value for the duration of the activity.
-    var title: String = "Walking Buddy"
+    var title: String = "Walker Buddy"
 }

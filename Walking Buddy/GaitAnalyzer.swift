@@ -1,6 +1,6 @@
 //
 //  GaitAnalyzer.swift
-//  Walking Buddy
+//  Walker Buddy
 //
 //  Real-time gait estimation from the iPhone's motion sensors (~50 Hz device
 //  motion). HealthKit's gait metrics (steadiness, asymmetry, double support,

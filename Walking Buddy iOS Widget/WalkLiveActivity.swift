@@ -1,6 +1,6 @@
 //
 //  WalkLiveActivity.swift
-//  Walking Buddy iOS Widget
+//  Walker Buddy iOS Widget
 //
 //  The Lock Screen card + Dynamic Island presentation for an active walk.
 //  Driven by the app's `Activity<WalkActivityAttributes>`.
@@ -84,7 +84,7 @@ private struct LockScreenLiveView: View {
             .frame(width: 48, height: 48)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Walking Buddy")
+                Text("Walker Buddy")
                     .font(.caption).bold()
                     .foregroundStyle(.white.opacity(0.9))
                 Text("Break risk \(state.risk)%")

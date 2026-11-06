@@ -1,6 +1,6 @@
 //
 //  Walking_Buddy_WatchApp.swift
-//  Walking Buddy Watch Watch App
+//  Walker Buddy Watch Watch App
 //
 //  Created by Logan Lee on 10/10/26.
 //

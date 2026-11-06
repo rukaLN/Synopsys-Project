@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  Walking Buddy Watch Watch App
+//  Walker Buddy Watch Watch App
 //
 
 import SwiftUI
@@ -36,7 +36,7 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: healthManager.isTracking ? "figure.walk" : "figure.walk.circle.fill")
                         .foregroundStyle(healthManager.isTracking ? Self.brandGreen : .secondary)
-                    Text(healthManager.isTracking ? "Monitoring" : "Walking Buddy")
+                    Text(healthManager.isTracking ? "Monitoring" : "Walker Buddy")
                         .font(.headline)
                         .foregroundStyle(healthManager.isTracking ? Self.brandGreen : .primary)
                 }

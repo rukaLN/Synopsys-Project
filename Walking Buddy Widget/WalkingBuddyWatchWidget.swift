@@ -1,8 +1,8 @@
 //
 //  WalkingBuddyWatchWidget.swift
-//  Walking Buddy Widget  (watchOS widget extension, embedded in the Watch app)
+//  Walker Buddy Widget  (watchOS widget extension, embedded in the Watch app)
 //
-//  watchOS complications (watch face) + Smart Stack widget for Walking Buddy.
+//  watchOS complications (watch face) + Smart Stack widget for Walker Buddy.
 //  Reads the live workout metrics the watch app mirrors into the shared App
 //  Group and renders them in the watchOS accessory families.
 //
@@ -136,7 +136,7 @@ struct WatchWidgetEntryView: View {
                 .tint(riskColor(entry.risk))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.isPaused ? "Paused" : (entry.isTracking ? "Monitoring" : "Walking Buddy"))
+                    Text(entry.isPaused ? "Paused" : (entry.isTracking ? "Monitoring" : "Walker Buddy"))
                         .font(.caption).bold()
                         .widgetAccentable()
                     Text("Break risk \(entry.risk)%")
@@ -169,7 +169,7 @@ struct WalkingBuddyWatchWidget: Widget {
         StaticConfiguration(kind: kind, provider: WatchProvider()) { entry in
             WatchWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Walking Buddy")
+        .configurationDisplayName("Walker Buddy")
         .description("Live break-risk and walk stats on your watch face.")
         .supportedFamilies([
             .accessoryCircular,
@@ -185,7 +185,7 @@ struct WalkingBuddyWatchWidget: Widget {
 /// Empty configuration intent required by `RelevanceEntriesProvider`.
 @available(watchOS 12.0, *)
 struct WalkRelevanceIntent: WidgetConfigurationIntent {
-    static let title: LocalizedStringResource = "Walking Buddy"
+    static let title: LocalizedStringResource = "Walker Buddy"
 }
 
 /// Relevance entry wrapping the shared App Group snapshot.
@@ -195,7 +195,7 @@ struct WalkRelevanceEntry: RelevanceEntry {
     let walk: WatchEntry
 }
 
-/// Tells the watchOS Smart Stack that Walking Buddy is relevant while a workout
+/// Tells the watchOS Smart Stack that Walker Buddy is relevant while a workout
 /// is active — a contextual clue instead of the timeline score. The fitness
 /// clue only fires if this widget extension has HealthKit permission.
 @available(watchOS 12.0, *)
@@ -225,11 +225,11 @@ struct WalkingBuddySmartStackWidget: Widget {
         RelevanceConfiguration(kind: kind, provider: WalkRelevanceProvider()) { entry in
             WatchWidgetEntryView(entry: entry.walk)
         }
-        .configurationDisplayName("Walking Buddy")
+        .configurationDisplayName("Walker Buddy")
         .description("Appears in the Smart Stack while you're on a walk.")
         .supportedFamilies([.accessoryRectangular, .accessoryCircular])
         // Lets this relevance widget stand in for the pinned timeline widget so
-        // the Smart Stack doesn't show two Walking Buddy entries.
+        // the Smart Stack doesn't show two Walker Buddy entries.
         .associatedKind("WalkingBuddyWatchWidget")
     }
 }

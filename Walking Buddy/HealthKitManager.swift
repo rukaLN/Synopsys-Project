@@ -63,7 +63,7 @@ final class HealthKitManager: NSObject, ObservableObject {
     /// The Apple Watch connection state as seen from the iPhone.
     enum WatchAvailability {
         case connected        // paired + our watch app installed → ready to sync
-        case appNotInstalled  // watch paired, but Walking Buddy isn't on it yet
+        case appNotInstalled  // watch paired, but Walker Buddy isn't on it yet
         case noWatch          // no Apple Watch paired to this iPhone
     }
     @Published var watchAvailability: WatchAvailability = .noWatch
@@ -1431,7 +1431,7 @@ extension HealthKitManager {
         }
     }
 
-    /// Ends every Walking Buddy Live Activity the system still has — including any
+    /// Ends every Walker Buddy Live Activity the system still has — including any
     /// orphaned by a previous termination — and drops our reference.
     func endAllLiveActivities() {
         liveActivity = nil

@@ -1,8 +1,8 @@
 //
 //  WalkingBuddyWidget.swift
-//  Walking Buddy Widget
+//  Walker Buddy Widget
 //
-//  Lock Screen widget for Walking Buddy. Reads the live metrics the app
+//  Lock Screen widget for Walker Buddy. Reads the live metrics the app
 //  mirrors into the shared App Group and renders them in the accessory
 //  families (circular / rectangular / inline).
 //
@@ -120,7 +120,7 @@ struct WalkWidgetEntryView: View {
                 .tint(riskColor(entry.risk))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.isTracking ? "Monitoring" : "Walking Buddy")
+                    Text(entry.isTracking ? "Monitoring" : "Walker Buddy")
                         .font(.caption).bold()
                         .widgetAccentable()
                     Text("Break risk \(entry.risk)%")
@@ -167,7 +167,7 @@ private struct HomeSmallView: View {
         VStack(spacing: 0) {
             HStack(spacing: 5) {
                 Image(systemName: "figure.walk")
-                Text("Walking Buddy")
+                Text("Walker Buddy")
                     .font(.caption2).fontWeight(.semibold)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -234,7 +234,7 @@ struct WalkingBuddyWidget: Widget {
         StaticConfiguration(kind: kind, provider: WalkProvider()) { entry in
             WalkWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Walking Buddy")
+        .configurationDisplayName("Walker Buddy")
         .description("Live break-risk and walk stats on your Lock Screen.")
         .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline, .systemSmall])
     }

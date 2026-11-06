@@ -1,6 +1,6 @@
 //
 //  Walking_BuddyApp.swift
-//  Walking Buddy
+//  Walker Buddy
 //
 //  Created by Logan Lee on 7/29/26.
 //

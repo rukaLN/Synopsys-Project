@@ -1,6 +1,6 @@
 //
 //  WatchHistoryView.swift
-//  Walking Buddy Watch Watch App
+//  Walker Buddy Watch Watch App
 //
 //  Compact history + trend graph for the watch, mirroring the iPhone's History
 //  tab. Reads the shared `WalkHistory` store (walks finished on this watch) and

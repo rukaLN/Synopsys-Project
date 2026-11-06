@@ -88,14 +88,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		358141183085A1F30085C2EE /* Exceptions for "Walking Buddy Widget" folder in "Walking Buddy WidgetExtension" target */ = {
+		358141183085A1F30085C2EE /* Exceptions for "Walker Buddy Widget" folder in "Walking Buddy WidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 358140FE3085A1F00085C2EE /* Walking Buddy WidgetExtension */;
 		};
-		358141323085A4FD0085C2EE /* Exceptions for "Walking Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */ = {
+		358141323085A4FD0085C2EE /* Exceptions for "Walker Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -126,17 +126,17 @@
 		358141053085A1F00085C2EE /* Walking Buddy Widget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				358141183085A1F30085C2EE /* Exceptions for "Walking Buddy Widget" folder in "Walking Buddy WidgetExtension" target */,
+				358141183085A1F30085C2EE /* Exceptions for "Walker Buddy Widget" folder in "Walking Buddy WidgetExtension" target */,
 			);
-			path = "Walking Buddy Widget";
+			path = "Walker Buddy Widget";
 			sourceTree = "<group>";
 		};
 		358141253085A4FA0085C2EE /* Walking Buddy iOS Widget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				358141323085A4FD0085C2EE /* Exceptions for "Walking Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */,
+				358141323085A4FD0085C2EE /* Exceptions for "Walker Buddy iOS Widget" folder in "Walking Buddy iOS WidgetExtension" target */,
 			);
-			path = "Walking Buddy iOS Widget";
+			path = "Walker Buddy iOS Widget";
 			sourceTree = "<group>";
 		};
 		35AA62F7301B041C0067AFD8 /* Walking Buddy */ = {
@@ -462,7 +462,7 @@
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy Widget/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy Widget";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy Widget";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy uses your active workout status to show your walk in the Smart Stack while you're walking.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -497,7 +497,7 @@
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy Widget/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy Widget";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy Widget";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy uses your active workout status to show your walk in the Smart Stack while you're walking.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -532,7 +532,7 @@
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy iOS Widget/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy iOS Widget";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy iOS Widget";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -564,7 +564,7 @@
 				DEVELOPMENT_TEAM = PJ8ZZ5UH63;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking Buddy iOS Widget/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy iOS Widget";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy iOS Widget";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -811,7 +811,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking-Buddy-Watch-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy Watch";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy Watch";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy reads your heart rate and movement to keep you safe on walks.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Walking buddy saves your walk as a workout.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -850,7 +850,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Walking-Buddy-Watch-Watch-App-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Walking Buddy Watch";
+				INFOPLIST_KEY_CFBundleDisplayName = "Walker Buddy Watch";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Walking Buddy reads your heart rate and movement to keep you safe on walks.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Walking buddy saves your walk as a workout.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
