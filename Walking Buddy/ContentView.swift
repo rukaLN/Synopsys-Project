@@ -550,6 +550,13 @@ struct BreakRiskInfoView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
+                    Text("Walker Buddy is for general wellness only. It is not a medical device and does not diagnose, treat, or prevent any condition. For medical concerns, talk to a healthcare professional.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
                     if let privacyURL = URL(string: "https://rukaln.github.io/Synopsys-Project/privacy-policy.html") {
                         Link("Privacy Policy", destination: privacyURL)
                             .font(.footnote.bold())

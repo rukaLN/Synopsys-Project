@@ -267,6 +267,11 @@ struct WatchRiskInfoView: View {
                     }
                     .padding(.vertical, 2)
                 }
+
+                Text("For general wellness only. Not a medical device; it does not diagnose, treat, or prevent any condition. For medical concerns, talk to a healthcare professional.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
             }
             .padding(.horizontal, 4)
         }
